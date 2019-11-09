@@ -2119,7 +2119,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 case MotionEvent.ACTION_CANCEL:
                     for (TouchContext aTouchContext : touchContextMap) {
                         aTouchContext.cancelTouch();
+<<<<<<< HEAD
                         aTouchContext.setPointerCount(0);
+=======
+>>>>>>> 6d186892 (Fix errant touch events after a cancelled gesture)
                     }
                     break;
                 default:
