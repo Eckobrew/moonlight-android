@@ -1860,6 +1860,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
 
     private void sendEmulatedMouseMove(short x, short y) {
         Vector2d vector = convertRawStickAxisToPixelMovement(x, y);
+        vector.scalarMultiply(prefConfig.mouseEmulationSensitivity / 100.0f); // user sensitivity
         if (vector.getMagnitude() >= 1) {
             conn.sendMouseMove((short)vector.getX(), (short)-vector.getY());
         }
