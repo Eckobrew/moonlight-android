@@ -17,6 +17,7 @@ import android.preference.Preference;
 import android.preference.PreferenceCategory;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceManager;
+import android.hardware.display.DisplayManager;
 import android.preference.PreferenceScreen;
 import android.util.DisplayMetrics;
 import android.util.Range;
@@ -351,82 +352,96 @@ public class StreamSettings extends Activity {
                 category_gamepad_settings.removePreference(findPreference("seekbar_vibrate_fallback_strength"));
             }
 
-            Display display = getActivity().getWindowManager().getDefaultDisplay();
-            float maxSupportedFps = display.getRefreshRate();
+            // Iterate through all available displays to gather supported resolutions and frame rates
+            DisplayManager displayManager = (DisplayManager) getActivity().getSystemService(Context.DISPLAY_SERVICE);
+            Display[] displays = displayManager != null ? displayManager.getDisplays() : new Display[]{getActivity().getWindowManager().getDefaultDisplay()};
 
-            // Hide non-supported resolution/FPS combinations
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                int maxSupportedResW = 0;
+            float maxSupportedFps = 0;
+            int maxSupportedResW = 0;
 
-                // Add a native resolution with any insets included for users that don't want content
-                // behind the notch of their display
-                boolean hasInsets = false;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    DisplayCutout cutout;
+            for (Display display : displays) {
+                if (display.getRefreshRate() > maxSupportedFps) {
+                    maxSupportedFps = display.getRefreshRate();
+                }
 
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        // Use the much nicer Display.getCutout() API on Android 10+
-                        cutout = display.getCutout();
+                // Hide non-supported resolution/FPS combinations
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    // Add a native resolution with any insets included for users that don't want content
+                    // behind the notch of their display
+                    boolean hasInsets = false;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        DisplayCutout cutout;
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            // Use the much nicer Display.getCutout() API on Android 10+
+                            cutout = display.getCutout();
+                        }
+                        else {
+                            // Android 9 only
+                            cutout = displayCutoutP;
+                        }
+
+                        if (cutout != null) {
+                            int widthInsets = cutout.getSafeInsetLeft() + cutout.getSafeInsetRight();
+                            int heightInsets = cutout.getSafeInsetBottom() + cutout.getSafeInsetTop();
+
+                            if (widthInsets != 0 || heightInsets != 0) {
+                                DisplayMetrics metrics = new DisplayMetrics();
+                                display.getRealMetrics(metrics);
+
+                                int width = Math.max(metrics.widthPixels - widthInsets, metrics.heightPixels - heightInsets);
+                                int height = Math.min(metrics.widthPixels - widthInsets, metrics.heightPixels - heightInsets);
+
+                                addNativeResolutionEntries(width, height, false);
+                                hasInsets = true;
+                            }
+                        }
                     }
-                    else {
-                        // Android 9 only
-                        cutout = displayCutoutP;
-                    }
 
-                    if (cutout != null) {
-                        int widthInsets = cutout.getSafeInsetLeft() + cutout.getSafeInsetRight();
-                        int heightInsets = cutout.getSafeInsetBottom() + cutout.getSafeInsetTop();
+                    // Always allow resolutions that are smaller or equal to the active
+                    // display resolution because decoders can report total non-sense to us.
+                    for (Display.Mode candidate : display.getSupportedModes()) {
+                        // Some devices report their dimensions in the portrait orientation
+                        // where height > width. Normalize these to the conventional width > height
+                        // arrangement before we process them.
 
-                        if (widthInsets != 0 || heightInsets != 0) {
-                            DisplayMetrics metrics = new DisplayMetrics();
-                            display.getRealMetrics(metrics);
+                        int width = Math.max(candidate.getPhysicalWidth(), candidate.getPhysicalHeight());
+                        int height = Math.min(candidate.getPhysicalWidth(), candidate.getPhysicalHeight());
 
-                            int width = Math.max(metrics.widthPixels - widthInsets, metrics.heightPixels - heightInsets);
-                            int height = Math.min(metrics.widthPixels - widthInsets, metrics.heightPixels - heightInsets);
+                        // Some TVs report strange values here, so let's avoid native resolutions on a TV
+                        // unless they report greater than 4K resolutions.
+                        if (!getActivity().getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEVISION) ||
+                                (width > 3840 || height > 2160)) {
+                            addNativeResolutionEntries(width, height, hasInsets);
+                        }
 
-                            addNativeResolutionEntries(width, height, false);
-                            hasInsets = true;
+                        if ((width >= 3840 || height >= 2160) && maxSupportedResW < 3840) {
+                            maxSupportedResW = 3840;
+                        }
+                        else if ((width >= 2560 || height >= 1440) && maxSupportedResW < 2560) {
+                            maxSupportedResW = 2560;
+                        }
+                        else if ((width >= 1920 || height >= 1080) && maxSupportedResW < 1920) {
+                            maxSupportedResW = 1920;
+                        }
+
+                        if (candidate.getRefreshRate() > maxSupportedFps) {
+                            maxSupportedFps = candidate.getRefreshRate();
                         }
                     }
                 }
-
-                // Always allow resolutions that are smaller or equal to the active
-                // display resolution because decoders can report total non-sense to us.
-                // For example, a p201 device reports:
-                // AVC Decoder: OMX.amlogic.avc.decoder.awesome
-                // HEVC Decoder: OMX.amlogic.hevc.decoder.awesome
-                // AVC supported width range: 64 - 384
-                // HEVC supported width range: 64 - 544
-                for (Display.Mode candidate : display.getSupportedModes()) {
-                    // Some devices report their dimensions in the portrait orientation
-                    // where height > width. Normalize these to the conventional width > height
-                    // arrangement before we process them.
-
-                    int width = Math.max(candidate.getPhysicalWidth(), candidate.getPhysicalHeight());
-                    int height = Math.min(candidate.getPhysicalWidth(), candidate.getPhysicalHeight());
-
-                    // Some TVs report strange values here, so let's avoid native resolutions on a TV
-                    // unless they report greater than 4K resolutions.
-                    if (!getActivity().getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEVISION) ||
-                            (width > 3840 || height > 2160)) {
-                        addNativeResolutionEntries(width, height, hasInsets);
-                    }
-
-                    if ((width >= 3840 || height >= 2160) && maxSupportedResW < 3840) {
-                        maxSupportedResW = 3840;
-                    }
-                    else if ((width >= 2560 || height >= 1440) && maxSupportedResW < 2560) {
-                        maxSupportedResW = 2560;
-                    }
-                    else if ((width >= 1920 || height >= 1080) && maxSupportedResW < 1920) {
-                        maxSupportedResW = 1920;
-                    }
-
-                    if (candidate.getRefreshRate() > maxSupportedFps) {
-                        maxSupportedFps = candidate.getRefreshRate();
-                    }
+                else {
+                    // We can get the true metrics via the getRealMetrics() function (unlike the lies
+                    // that getWidth() and getHeight() tell to us).
+                    DisplayMetrics metrics = new DisplayMetrics();
+                    display.getRealMetrics(metrics);
+                    int width = Math.max(metrics.widthPixels, metrics.heightPixels);
+                    int height = Math.min(metrics.widthPixels, metrics.heightPixels);
+                    addNativeResolutionEntries(width, height, false);
                 }
+            }
 
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 // This must be called to do runtime initialization before calling functions that evaluate
                 // decoder lists.
                 MediaCodecHelper.initialize(getContext(), GlPreferences.readPreferences(getContext()).glRenderer);
@@ -511,15 +526,6 @@ public class StreamSettings extends Activity {
                     // Never remove 720p
                 }
             }
-            else {
-                // We can get the true metrics via the getRealMetrics() function (unlike the lies
-                // that getWidth() and getHeight() tell to us).
-                DisplayMetrics metrics = new DisplayMetrics();
-                display.getRealMetrics(metrics);
-                int width = Math.max(metrics.widthPixels, metrics.heightPixels);
-                int height = Math.min(metrics.widthPixels, metrics.heightPixels);
-                addNativeResolutionEntries(width, height, false);
-            }
 
             if (!PreferenceConfiguration.readPreferences(this.getActivity()).unlockFps) {
                 // We give some extra room in case the FPS is rounded down
@@ -580,18 +586,19 @@ public class StreamSettings extends Activity {
                 category.removePreference(findPreference("checkbox_enable_hdr"));
             }
             else {
-                Display.HdrCapabilities hdrCaps = display.getHdrCapabilities();
-
-                // We must now ensure our display is compatible with HDR10
+                // We must now ensure at least one display is compatible with HDR10
                 boolean foundHdr10 = false;
-                if (hdrCaps != null) {
-                    // getHdrCapabilities() returns null on Lenovo Lenovo Mirage Solo (vega), Android 8.0
-                    for (int hdrType : hdrCaps.getSupportedHdrTypes()) {
-                        if (hdrType == Display.HdrCapabilities.HDR_TYPE_HDR10) {
-                            foundHdr10 = true;
-                            break;
+                for (Display display : displays) {
+                    Display.HdrCapabilities hdrCaps = display.getHdrCapabilities();
+                    if (hdrCaps != null) {
+                        for (int hdrType : hdrCaps.getSupportedHdrTypes()) {
+                            if (hdrType == Display.HdrCapabilities.HDR_TYPE_HDR10) {
+                                foundHdr10 = true;
+                                break;
+                            }
                         }
                     }
+                    if (foundHdr10) break;
                 }
 
                 if (!foundHdr10) {
