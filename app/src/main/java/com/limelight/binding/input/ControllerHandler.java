@@ -1225,7 +1225,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             GenericControllerContext context = inputDeviceContexts.valueAt(i);
             if (context.assignedControllerNumber &&
                     context.controllerNumber == controllerNumber &&
-                    context.mouseEmulationActive == originalContext.mouseEmulationActive) {
+                    context.mouseEmulation.isActive() == originalContext.mouseEmulation.isActive()) {
                 inputMap |= context.inputMap;
                 leftTrigger |= maxByMagnitude(leftTrigger, context.leftTrigger);
                 rightTrigger |= maxByMagnitude(rightTrigger, context.rightTrigger);
@@ -1239,7 +1239,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             GenericControllerContext context = usbDeviceContexts.valueAt(i);
             if (context.assignedControllerNumber &&
                     context.controllerNumber == controllerNumber &&
-                    context.mouseEmulationActive == originalContext.mouseEmulationActive) {
+                    context.mouseEmulation.isActive() == originalContext.mouseEmulation.isActive()) {
                 inputMap |= context.inputMap;
                 leftTrigger |= maxByMagnitude(leftTrigger, context.leftTrigger);
                 rightTrigger |= maxByMagnitude(rightTrigger, context.rightTrigger);
@@ -1259,53 +1259,8 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             rightStickY |= maxByMagnitude(rightStickY, defaultContext.rightStickY);
         }
 
-        if (originalContext.mouseEmulationActive) {
-            int changedMask = inputMap ^  originalContext.mouseEmulationLastInputMap;
-
-            boolean aDown = (inputMap & ControllerPacket.A_FLAG) != 0;
-            boolean bDown = (inputMap & ControllerPacket.B_FLAG) != 0;
-
-            originalContext.mouseEmulationLastInputMap = inputMap;
-
-            if ((changedMask & ControllerPacket.A_FLAG) != 0) {
-                if (aDown) {
-                    conn.sendMouseButtonDown(MouseButtonPacket.BUTTON_LEFT);
-                }
-                else {
-                    conn.sendMouseButtonUp(MouseButtonPacket.BUTTON_LEFT);
-                }
-            }
-            if ((changedMask & ControllerPacket.B_FLAG) != 0) {
-                if (bDown) {
-                    conn.sendMouseButtonDown(MouseButtonPacket.BUTTON_RIGHT);
-                }
-                else {
-                    conn.sendMouseButtonUp(MouseButtonPacket.BUTTON_RIGHT);
-                }
-            }
-            if ((changedMask & ControllerPacket.UP_FLAG) != 0) {
-                if ((inputMap & ControllerPacket.UP_FLAG) != 0) {
-                    conn.sendMouseScroll((byte) 1);
-                }
-            }
-            if ((changedMask & ControllerPacket.DOWN_FLAG) != 0) {
-                if ((inputMap & ControllerPacket.DOWN_FLAG) != 0) {
-                    conn.sendMouseScroll((byte) -1);
-                }
-            }
-            if ((changedMask & ControllerPacket.RIGHT_FLAG) != 0) {
-                if ((inputMap & ControllerPacket.RIGHT_FLAG) != 0) {
-                    conn.sendMouseHScroll((byte) 1);
-                }
-            }
-            if ((changedMask & ControllerPacket.LEFT_FLAG) != 0) {
-                if ((inputMap & ControllerPacket.LEFT_FLAG) != 0) {
-                    conn.sendMouseHScroll((byte) -1);
-                }
-            }
-
-            conn.sendControllerInput(controllerNumber, getActiveControllerMask(),
-                    (short)0, (byte)0, (byte)0, (short)0, (short)0, (short)0, (short)0);
+        if (originalContext.mouseEmulation.isActive()) {
+            originalContext.mouseEmulation.handleButtonInput(inputMap, controllerNumber, getActiveControllerMask());
         }
         else {
             conn.sendControllerInput(controllerNumber, getActiveControllerMask(),
@@ -1846,33 +1801,9 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         return true;
     }
 
-    private Vector2d convertRawStickAxisToPixelMovement(short stickX, short stickY) {
-        Vector2d vector = new Vector2d();
-        vector.initialize(stickX, stickY);
-        vector.scalarMultiply(1 / 32766.0f);
-        vector.scalarMultiply(4);
-        if (vector.getMagnitude() > 0) {
-            // Move faster as the stick is pressed further from center
-            vector.scalarMultiply(Math.pow(vector.getMagnitude(), 2));
-        }
-        return vector;
-    }
 
-    private void sendEmulatedMouseMove(short x, short y) {
-        Vector2d vector = convertRawStickAxisToPixelMovement(x, y);
-        vector.scalarMultiply(prefConfig.mouseEmulationSensitivity / 100.0f); // user sensitivity
-        if (vector.getMagnitude() >= 1) {
-            conn.sendMouseMove((short)vector.getX(), (short)-vector.getY());
-        }
-    }
 
-    private void sendEmulatedMouseScroll(short x, short y) {
-        Vector2d vector = convertRawStickAxisToPixelMovement(x, y);
-        if (vector.getMagnitude() >= 1) {
-            conn.sendMouseHighResScroll((short)vector.getY());
-            conn.sendMouseHighResHScroll((short)vector.getX());
-        }
-    }
+
 
     @TargetApi(31)
     private boolean hasDualAmplitudeControlledRumbleVibrators(VibratorManager vm) {
@@ -2370,7 +2301,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             if ((context.inputMap & ControllerPacket.PLAY_FLAG) != 0 &&
                     event.getEventTime() - context.startDownTime > ControllerHandler.START_DOWN_TIME_MOUSE_MODE_MS &&
                     prefConfig.mouseEmulation) {
-                context.toggleMouseEmulation();
+                context.mouseEmulation.toggle();
             }
             context.inputMap &= ~ControllerPacket.PLAY_FLAG;
             break;
@@ -2863,7 +2794,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         usbDeviceContexts.put(controller.getControllerId(), context);
     }
 
-    class GenericControllerContext {
+    class GenericControllerContext implements MouseEmulationHandler.StickValueProvider {
         public int id;
         public boolean external;
 
@@ -2886,49 +2817,23 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         public short leftStickX = 0x0000;
         public short leftStickY = 0x0000;
 
-        public boolean mouseEmulationActive;
-        public int mouseEmulationLastInputMap;
-        public final int mouseEmulationReportPeriod = 50;
+        public final MouseEmulationHandler mouseEmulation = new MouseEmulationHandler(
+                conn, prefConfig, mainThreadHandler, activityContext, this);
 
-        public final Runnable mouseEmulationRunnable = new Runnable() {
-            @Override
-            public void run() {
-                if (!mouseEmulationActive) {
-                    return;
-                }
+        @Override
+        public short getLeftStickX() { return leftStickX; }
 
-                // Send mouse events from analog sticks
-                if (prefConfig.analogStickForScrolling == PreferenceConfiguration.AnalogStickForScrolling.RIGHT) {
-                    sendEmulatedMouseMove(leftStickX, leftStickY);
-                    sendEmulatedMouseScroll(rightStickX, rightStickY);
-                }
-                else if (prefConfig.analogStickForScrolling == PreferenceConfiguration.AnalogStickForScrolling.LEFT) {
-                    sendEmulatedMouseMove(rightStickX, rightStickY);
-                    sendEmulatedMouseScroll(leftStickX, leftStickY);
-                }
-                else {
-                    sendEmulatedMouseMove(leftStickX, leftStickY);
-                    sendEmulatedMouseMove(rightStickX, rightStickY);
-                }
+        @Override
+        public short getLeftStickY() { return leftStickY; }
 
-                // Requeue the callback
-                mainThreadHandler.postDelayed(this, mouseEmulationReportPeriod);
-            }
-        };
+        @Override
+        public short getRightStickX() { return rightStickX; }
 
-        public void toggleMouseEmulation() {
-            mainThreadHandler.removeCallbacks(mouseEmulationRunnable);
-            mouseEmulationActive = !mouseEmulationActive;
-            Toast.makeText(activityContext, "Mouse emulation is: " + (mouseEmulationActive ? "ON" : "OFF"), Toast.LENGTH_SHORT).show();
-
-            if (mouseEmulationActive) {
-                mainThreadHandler.postDelayed(mouseEmulationRunnable, mouseEmulationReportPeriod);
-            }
-        }
+        @Override
+        public short getRightStickY() { return rightStickY; }
 
         public void destroy() {
-            mouseEmulationActive = false;
-            mainThreadHandler.removeCallbacks(mouseEmulationRunnable);
+            mouseEmulation.destroy();
         }
 
         public void sendControllerArrival() {}
