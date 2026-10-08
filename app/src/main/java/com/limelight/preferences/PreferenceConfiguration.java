@@ -30,6 +30,7 @@ public class PreferenceConfiguration {
     static final String FPS_PREF_STRING = "list_fps";
     static final String BITRATE_PREF_STRING = "seekbar_bitrate_kbps";
     private static final String BITRATE_PREF_OLD_STRING = "seekbar_bitrate";
+    private static final String METERED_BITRATE_PREF_STRING = "seekbar_metered_bitrate_kbps";
     private static final String STRETCH_PREF_STRING = "checkbox_stretch_video";
     private static final String SOPS_PREF_STRING = "checkbox_enable_sops";
     private static final String DISABLE_TOASTS_PREF_STRING = "checkbox_disable_warnings";
@@ -128,6 +129,7 @@ public class PreferenceConfiguration {
 
     public int width, height, fps;
     public int bitrate;
+    public int meteredBitrate;
     public FormatOption videoFormat;
     public int deadzonePercentage;
     public int oscOpacity;
@@ -426,6 +428,7 @@ public class PreferenceConfiguration {
         prefs.edit()
                 .remove(BITRATE_PREF_STRING)
                 .remove(BITRATE_PREF_OLD_STRING)
+                .remove(METERED_BITRATE_PREF_STRING)
                 .remove(LEGACY_RES_FPS_PREF_STRING)
                 .remove(RESOLUTION_PREF_STRING)
                 .remove(FPS_PREF_STRING)
@@ -552,6 +555,12 @@ public class PreferenceConfiguration {
         config.bitrate = prefs.getInt(BITRATE_PREF_STRING, prefs.getInt(BITRATE_PREF_OLD_STRING, 0) * 1000);
         if (config.bitrate == 0) {
             config.bitrate = getDefaultBitrate(context);
+        }
+
+        config.meteredBitrate = prefs.getInt(METERED_BITRATE_PREF_STRING, 0);
+        if (config.meteredBitrate == 0) {
+            config.meteredBitrate = config.bitrate / 4;
+            prefs.edit().putInt(METERED_BITRATE_PREF_STRING, 0).apply();
         }
 
         String audioConfig = prefs.getString(AUDIO_CONFIG_PREF_STRING, DEFAULT_AUDIO_CONFIG);
