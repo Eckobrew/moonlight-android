@@ -129,7 +129,7 @@ public class VirtualController {
         return handler;
     }
 
-    private boolean isControllerVisible() {
+    public boolean isControllerVisible() {
         return buttonConfigure.getVisibility() == View.VISIBLE;
     }
 

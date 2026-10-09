@@ -40,6 +40,7 @@ import com.limelight.utils.UiHelper;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.PictureInPictureParams;
 import android.app.Service;
 import android.content.ComponentName;
@@ -97,6 +98,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Only 2 touches are supported
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private long threeFingerDownTime = 0;
+    private long fourFingerDownTime = 0;
 
     private static final int REFERENCE_HORIZ_RES = 1280;
     private static final int REFERENCE_VERT_RES = 720;
@@ -108,6 +110,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private static final int STYLUS_UP_DEAD_ZONE_RADIUS = 50;
 
     private static final int THREE_FINGER_TAP_THRESHOLD = 300;
+    private static final int FOUR_FINGER_TAP_THRESHOLD = 300;
 
     private ControllerHandler controllerHandler;
     private KeyboardTranslator keyboardTranslator;
@@ -1510,6 +1513,45 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         inputManager.toggleSoftInput(0, 0);
     }
 
+    private void showFourFingerMenu() {
+        runOnUiThread(() -> {
+            boolean gamepadVisible = virtualController != null && virtualController.isControllerVisible();
+
+            CharSequence[] options = new CharSequence[] {
+                "Disconnect",
+                "Quit Game",
+                "Toggle Soft Keyboard",
+                (gamepadVisible ? "Hide Virtual Gamepad" : "Show Virtual Gamepad")
+            };
+
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("Stream Options");
+            builder.setItems(options, (dialog, which) -> {
+                switch (which) {
+                    case 0: // Disconnect
+                        finish();
+                        break;
+                    case 1: // Quit Game
+                        finish();
+                        break;
+                    case 2: // Toggle soft keyboard
+                        toggleKeyboard();
+                        break;
+                    case 3: // Toggle virtual gamepad
+                        if (virtualController != null) {
+                            if (gamepadVisible) {
+                                virtualController.hide();
+                            } else {
+                                virtualController.show();
+                            }
+                        }
+                        break;
+                }
+            });
+            builder.show();
+        });
+    }
+
     private byte getLiTouchTypeFromEvent(MotionEvent event) {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
@@ -2023,19 +2065,22 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 int eventX = (int)(event.getX(actionIndex) + xOffset);
                 int eventY = (int)(event.getY(actionIndex) + yOffset);
 
-                // Special handling for 3 finger gesture
-                if (event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN &&
-                        event.getPointerCount() == 3) {
-                    // Three fingers down
-                    threeFingerDownTime = event.getEventTime();
-
-                    // Cancel the first and second touches to avoid
-                    // erroneous events
-                    for (TouchContext aTouchContext : touchContextMap) {
-                        aTouchContext.cancelTouch();
+                // Special handling for 3 or 4 finger gesture
+                if (event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN) {
+                    if (event.getPointerCount() == 3) {
+                        threeFingerDownTime = event.getEventTime();
+                        for (TouchContext aTouchContext : touchContextMap) {
+                            aTouchContext.cancelTouch();
+                        }
+                        return true;
                     }
-
-                    return true;
+                    else if (event.getPointerCount() == 4) {
+                        fourFingerDownTime = event.getEventTime();
+                        for (TouchContext aTouchContext : touchContextMap) {
+                            aTouchContext.cancelTouch();
+                        }
+                        return true;
+                    }
                 }
 
                 if (!prefConfig.touchscreenTrackpad && trySendTouchEvent(view, event)) {
@@ -2066,6 +2111,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         if (event.getEventTime() - threeFingerDownTime < THREE_FINGER_TAP_THRESHOLD) {
                             // This is a 3 finger tap to bring up the keyboard
                             toggleKeyboard();
+                            return true;
+                        }
+                        else if (event.getEventTime() - fourFingerDownTime < FOUR_FINGER_TAP_THRESHOLD) {
+                            // This is a 4 finger tap to bring up the stream options menu
+                            showFourFingerMenu();
                             return true;
                         }
                     }
