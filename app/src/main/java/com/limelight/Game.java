@@ -2076,6 +2076,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     }
                     else if (event.getPointerCount() == 4) {
                         fourFingerDownTime = event.getEventTime();
+                        threeFingerDownTime = 0;
                         for (TouchContext aTouchContext : touchContextMap) {
                             aTouchContext.cancelTouch();
                         }
