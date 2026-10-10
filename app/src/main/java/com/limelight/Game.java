@@ -98,6 +98,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Only 2 touches are supported
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private long threeFingerDownTime = 0;
+    private boolean quitOnStop = false;
+    private String host;
+    private int port;
+    private int httpsPort;
+    private int appId;
+    private String uniqueId;
+    private X509Certificate serverCert;
 
     private static final int REFERENCE_HORIZ_RES = 1280;
     private static final int REFERENCE_VERT_RES = 720;
@@ -317,17 +324,16 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         appName = Game.this.getIntent().getStringExtra(EXTRA_APP_NAME);
         pcName = Game.this.getIntent().getStringExtra(EXTRA_PC_NAME);
 
-        String host = Game.this.getIntent().getStringExtra(EXTRA_HOST);
-        int port = Game.this.getIntent().getIntExtra(EXTRA_PORT, NvHTTP.DEFAULT_HTTP_PORT);
-        int httpsPort = Game.this.getIntent().getIntExtra(EXTRA_HTTPS_PORT, 0); // 0 is treated as unknown
-        int appId = Game.this.getIntent().getIntExtra(EXTRA_APP_ID, StreamConfiguration.INVALID_APP_ID);
-        String uniqueId = Game.this.getIntent().getStringExtra(EXTRA_UNIQUEID);
+        host = Game.this.getIntent().getStringExtra(EXTRA_HOST);
+        port = Game.this.getIntent().getIntExtra(EXTRA_PORT, NvHTTP.DEFAULT_HTTP_PORT);
+        httpsPort = Game.this.getIntent().getIntExtra(EXTRA_HTTPS_PORT, 0); // 0 is treated as unknown
+        appId = Game.this.getIntent().getIntExtra(EXTRA_APP_ID, StreamConfiguration.INVALID_APP_ID);
+        uniqueId = Game.this.getIntent().getStringExtra(EXTRA_UNIQUEID);
         boolean appSupportsHdr = Game.this.getIntent().getBooleanExtra(EXTRA_APP_HDR, false);
         byte[] derCertData = Game.this.getIntent().getByteArrayExtra(EXTRA_SERVER_CERT);
 
         app = new NvApp(appName != null ? appName : "app", appId, appSupportsHdr);
 
-        X509Certificate serverCert = null;
         try {
             if (derCertData != null) {
                 serverCert = (X509Certificate) CertificateFactory.getInstance("X.509")
@@ -1508,7 +1514,29 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     public void toggleKeyboard() {
         LimeLog.info("Toggling keyboard overlay");
         InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (streamView != null) {
+            streamView.setFocusable(true);
+            streamView.setFocusableInTouchMode(true);
+            streamView.requestFocus();
+        }
         inputManager.toggleSoftInput(InputMethodManager.SHOW_FORCED, InputMethodManager.HIDE_IMPLICIT_ONLY);
+    }
+
+    public void quit() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Quit Game");
+        builder.setMessage(R.string.applist_quit_confirmation);
+
+        builder.setPositiveButton(R.string.yes, (dialog, which) -> {
+            quitOnStop = true;
+            dialog.dismiss();
+            finish();
+        });
+
+        builder.setNegativeButton(R.string.no, (dialog, which) -> dialog.dismiss());
+
+        AlertDialog dialog = builder.create();
+        dialog.show();
     }
 
     private void showFourFingerMenu() {
@@ -1531,6 +1559,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         finish();
                         break;
                     case 1: // Quit Game
+                        new Thread(() -> {
+                            try {
+                                NvHTTP httpConn = new NvHTTP(new ComputerDetails.AddressTuple(host, port), httpsPort, uniqueId, serverCert, PlatformBinding.getCryptoProvider(Game.this));
+                                httpConn.quitApp();
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        }).start();
                         stopConnection();
                         finish();
                         break;
@@ -1538,9 +1574,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         toggleKeyboard();
                         break;
                     case 3: // Toggle virtual gamepad
-                        if (virtualController != null) {
-                            virtualController.toggle();
+                        if (virtualController == null) {
+                            virtualController = new VirtualController(controllerHandler, (FrameLayout) streamView.getParent(), Game.this);
+                            virtualController.refreshLayout();
                         }
+                        virtualController.toggle();
                         break;
                 }
             });
