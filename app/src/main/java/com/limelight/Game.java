@@ -76,6 +76,8 @@ import android.view.View.OnTouchListener;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
@@ -1516,18 +1518,38 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     public void showKeyboard() {
         LimeLog.info("Showing soft keyboard");
-        InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (hiddenKeyboardInput == null) {
             hiddenKeyboardInput = new EditText(this);
-            hiddenKeyboardInput.setVisibility(View.GONE);
-            hiddenKeyboardInput.setFocusable(true);
+            hiddenKeyboardInput.setLayoutParams(new FrameLayout.LayoutParams(1, 1));
+            hiddenKeyboardInput.setAlpha(0f);
             hiddenKeyboardInput.setFocusableInTouchMode(true);
             if (streamView != null && streamView.getParent() instanceof ViewGroup) {
                 ((ViewGroup) streamView.getParent()).addView(hiddenKeyboardInput);
             }
+            hiddenKeyboardInput.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {}
+                @Override
+                public void afterTextChanged(Editable s) {
+                    if (s.length() > 0 && conn != null) {
+                        if (s.charAt(s.length() - 1) == '\n') {
+                            onKey(null, KeyEvent.KEYCODE_ENTER, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+                            onKey(null, KeyEvent.KEYCODE_ENTER, new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
+                        } else {
+                            conn.sendUtf8Text(s.toString());
+                        }
+                        s.clear();
+                    }
+                }
+            });
         }
         hiddenKeyboardInput.requestFocus();
-        inputManager.showSoftInput(hiddenKeyboardInput, InputMethodManager.SHOW_FORCED);
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.toggleSoftInput(InputMethodManager.SHOW_IMPLICIT, 0);
+        }
     }
 
     @Override
