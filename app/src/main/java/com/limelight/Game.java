@@ -98,7 +98,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Only 2 touches are supported
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private long threeFingerDownTime = 0;
-    private long fourFingerDownTime = 0;
 
     private static final int REFERENCE_HORIZ_RES = 1280;
     private static final int REFERENCE_VERT_RES = 720;
@@ -110,7 +109,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private static final int STYLUS_UP_DEAD_ZONE_RADIUS = 50;
 
     private static final int THREE_FINGER_TAP_THRESHOLD = 300;
-    private static final int FOUR_FINGER_TAP_THRESHOLD = 300;
 
     private ControllerHandler controllerHandler;
     private KeyboardTranslator keyboardTranslator;
@@ -2065,23 +2063,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 int eventX = (int)(event.getX(actionIndex) + xOffset);
                 int eventY = (int)(event.getY(actionIndex) + yOffset);
 
-                // Special handling for 3 or 4 finger gesture
-                if (event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN) {
-                    if (event.getPointerCount() == 3) {
-                        threeFingerDownTime = event.getEventTime();
-                        for (TouchContext aTouchContext : touchContextMap) {
-                            aTouchContext.cancelTouch();
-                        }
-                        return true;
+                // Special handling for 3 finger gesture
+                if (event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN &&
+                        event.getPointerCount() == 3) {
+                    threeFingerDownTime = event.getEventTime();
+                    for (TouchContext aTouchContext : touchContextMap) {
+                        aTouchContext.cancelTouch();
                     }
-                    else if (event.getPointerCount() == 4) {
-                        fourFingerDownTime = event.getEventTime();
-                        threeFingerDownTime = 0;
-                        for (TouchContext aTouchContext : touchContextMap) {
-                            aTouchContext.cancelTouch();
-                        }
-                        return true;
-                    }
+                    return true;
                 }
 
                 if (!prefConfig.touchscreenTrackpad && trySendTouchEvent(view, event)) {
@@ -2110,12 +2099,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                             (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || (event.getFlags() & MotionEvent.FLAG_CANCELED) == 0)) {
                         // All fingers up
                         if (event.getEventTime() - threeFingerDownTime < THREE_FINGER_TAP_THRESHOLD) {
-                            // This is a 3 finger tap to bring up the keyboard
-                            toggleKeyboard();
-                            return true;
-                        }
-                        else if (event.getEventTime() - fourFingerDownTime < FOUR_FINGER_TAP_THRESHOLD) {
-                            // This is a 4 finger tap to bring up the stream options menu
+                            // This is a 3 finger tap to bring up the stream options menu
                             showFourFingerMenu();
                             return true;
                         }
