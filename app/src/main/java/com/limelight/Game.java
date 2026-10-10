@@ -1508,7 +1508,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     public void toggleKeyboard() {
         LimeLog.info("Toggling keyboard overlay");
         InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        inputManager.toggleSoftInput(0, 0);
+        inputManager.toggleSoftInput(InputMethodManager.SHOW_FORCED, InputMethodManager.HIDE_IMPLICIT_ONLY);
     }
 
     private void showFourFingerMenu() {
@@ -1527,9 +1527,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             builder.setItems(options, (dialog, which) -> {
                 switch (which) {
                     case 0: // Disconnect
+                        stopConnection();
                         finish();
                         break;
                     case 1: // Quit Game
+                        stopConnection();
                         finish();
                         break;
                     case 2: // Toggle soft keyboard
@@ -1537,11 +1539,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         break;
                     case 3: // Toggle virtual gamepad
                         if (virtualController != null) {
-                            if (gamepadVisible) {
-                                virtualController.hide();
-                            } else {
-                                virtualController.show();
-                            }
+                            virtualController.toggle();
                         }
                         break;
                 }

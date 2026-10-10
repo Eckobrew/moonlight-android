@@ -133,6 +133,16 @@ public class VirtualController {
         return buttonConfigure.getVisibility() == View.VISIBLE;
     }
 
+    public void toggle() {
+        if (currentMode == ControllerMode.Active) {
+            if (isControllerVisible()) {
+                hide();
+            } else {
+                show();
+            }
+        }
+    }
+
     public void hide() {
         for (VirtualControllerElement element : elements) {
             element.setVisibility(View.INVISIBLE);
