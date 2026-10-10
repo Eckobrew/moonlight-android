@@ -73,10 +73,12 @@ import android.view.View;
 import android.view.View.OnGenericMotionListener;
 import android.view.View.OnSystemUiVisibilityChangeListener;
 import android.view.View.OnTouchListener;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -98,6 +100,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Only 2 touches are supported
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private long threeFingerDownTime = 0;
+    private EditText hiddenKeyboardInput = null;
     private boolean quitOnStop = false;
     private String host;
     private int port;
@@ -1511,15 +1514,25 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     @Override
-    public void toggleKeyboard() {
-        LimeLog.info("Toggling keyboard overlay");
+    public void showKeyboard() {
+        LimeLog.info("Showing soft keyboard");
         InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (streamView != null) {
-            streamView.setFocusable(true);
-            streamView.setFocusableInTouchMode(true);
-            streamView.requestFocus();
+        if (hiddenKeyboardInput == null) {
+            hiddenKeyboardInput = new EditText(this);
+            hiddenKeyboardInput.setVisibility(View.GONE);
+            hiddenKeyboardInput.setFocusable(true);
+            hiddenKeyboardInput.setFocusableInTouchMode(true);
+            if (streamView != null && streamView.getParent() instanceof ViewGroup) {
+                ((ViewGroup) streamView.getParent()).addView(hiddenKeyboardInput);
+            }
         }
-        inputManager.toggleSoftInput(InputMethodManager.SHOW_FORCED, InputMethodManager.HIDE_IMPLICIT_ONLY);
+        hiddenKeyboardInput.requestFocus();
+        inputManager.showSoftInput(hiddenKeyboardInput, InputMethodManager.SHOW_FORCED);
+    }
+
+    @Override
+    public void toggleKeyboard() {
+        showKeyboard();
     }
 
     public void quit() {
@@ -1546,7 +1559,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             CharSequence[] options = new CharSequence[] {
                 "Disconnect",
                 "Quit Game",
-                "Toggle Soft Keyboard",
+                "Show Soft Keyboard",
                 (gamepadVisible ? "Hide Virtual Gamepad" : "Show Virtual Gamepad")
             };
 
@@ -1559,19 +1572,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         finish();
                         break;
                     case 1: // Quit Game
-                        new Thread(() -> {
-                            try {
-                                NvHTTP httpConn = new NvHTTP(new ComputerDetails.AddressTuple(host, port), httpsPort, uniqueId, serverCert, PlatformBinding.getCryptoProvider(Game.this));
-                                httpConn.quitApp();
-                            } catch (Exception e) {
-                                e.printStackTrace();
-                            }
-                        }).start();
-                        stopConnection();
-                        finish();
+                        quit();
                         break;
-                    case 2: // Toggle soft keyboard
-                        toggleKeyboard();
+                    case 2: // Show soft keyboard
+                        showKeyboard();
                         break;
                     case 3: // Toggle virtual gamepad
                         if (virtualController == null) {
