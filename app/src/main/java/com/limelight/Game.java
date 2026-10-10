@@ -40,6 +40,7 @@ import com.limelight.utils.UiHelper;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.PictureInPictureParams;
 import android.app.Service;
 import android.content.ComponentName;
@@ -72,10 +73,15 @@ import android.view.View;
 import android.view.View.OnGenericMotionListener;
 import android.view.View.OnSystemUiVisibilityChangeListener;
 import android.view.View.OnTouchListener;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.FrameLayout;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -97,6 +103,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Only 2 touches are supported
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private long threeFingerDownTime = 0;
+    private EditText hiddenKeyboardInput = null;
+    private boolean quitOnStop = false;
+    private String host;
+    private int port;
+    private int httpsPort;
+    private int appId;
+    private String uniqueId;
+    private X509Certificate serverCert;
 
     private static final int REFERENCE_HORIZ_RES = 1280;
     private static final int REFERENCE_VERT_RES = 720;
@@ -201,6 +215,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN);
+
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
 
         // Listen for UI visibility events
         getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(this);
@@ -316,17 +332,16 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         appName = Game.this.getIntent().getStringExtra(EXTRA_APP_NAME);
         pcName = Game.this.getIntent().getStringExtra(EXTRA_PC_NAME);
 
-        String host = Game.this.getIntent().getStringExtra(EXTRA_HOST);
-        int port = Game.this.getIntent().getIntExtra(EXTRA_PORT, NvHTTP.DEFAULT_HTTP_PORT);
-        int httpsPort = Game.this.getIntent().getIntExtra(EXTRA_HTTPS_PORT, 0); // 0 is treated as unknown
-        int appId = Game.this.getIntent().getIntExtra(EXTRA_APP_ID, StreamConfiguration.INVALID_APP_ID);
-        String uniqueId = Game.this.getIntent().getStringExtra(EXTRA_UNIQUEID);
+        host = Game.this.getIntent().getStringExtra(EXTRA_HOST);
+        port = Game.this.getIntent().getIntExtra(EXTRA_PORT, NvHTTP.DEFAULT_HTTP_PORT);
+        httpsPort = Game.this.getIntent().getIntExtra(EXTRA_HTTPS_PORT, 0); // 0 is treated as unknown
+        appId = Game.this.getIntent().getIntExtra(EXTRA_APP_ID, StreamConfiguration.INVALID_APP_ID);
+        uniqueId = Game.this.getIntent().getStringExtra(EXTRA_UNIQUEID);
         boolean appSupportsHdr = Game.this.getIntent().getBooleanExtra(EXTRA_APP_HDR, false);
         byte[] derCertData = Game.this.getIntent().getByteArrayExtra(EXTRA_SERVER_CERT);
 
         app = new NvApp(appName != null ? appName : "app", appId, appSupportsHdr);
 
-        X509Certificate serverCert = null;
         try {
             if (derCertData != null) {
                 serverCert = (X509Certificate) CertificateFactory.getInstance("X.509")
@@ -1505,9 +1520,95 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void toggleKeyboard() {
-        LimeLog.info("Toggling keyboard overlay");
-        InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        inputManager.toggleSoftInput(0, 0);
+        LimeLog.info("Toggling soft keyboard");
+        if (hiddenKeyboardInput == null) {
+            hiddenKeyboardInput = new EditText(this);
+            hiddenKeyboardInput.setLayoutParams(new FrameLayout.LayoutParams(1, 1));
+            hiddenKeyboardInput.setAlpha(0f);
+            hiddenKeyboardInput.setFocusableInTouchMode(true);
+            hiddenKeyboardInput.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+            if (streamView != null && streamView.getParent() instanceof ViewGroup) {
+                ((ViewGroup) streamView.getParent()).addView(hiddenKeyboardInput);
+            }
+            hiddenKeyboardInput.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {}
+                @Override
+                public void afterTextChanged(Editable s) {
+                    if (s.length() > 0 && conn != null) {
+                        if (s.charAt(s.length() - 1) == '\n') {
+                            onKey(null, KeyEvent.KEYCODE_ENTER, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+                            onKey(null, KeyEvent.KEYCODE_ENTER, new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
+                        } else {
+                            conn.sendUtf8Text(s.toString());
+                        }
+                        s.clear();
+                    }
+                }
+            });
+        }
+        hiddenKeyboardInput.requestFocus();
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.toggleSoftInput(InputMethodManager.SHOW_IMPLICIT, 0);
+        }
+    }
+
+    public void quit() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Quit Game");
+        builder.setMessage(R.string.applist_quit_confirmation);
+
+        builder.setPositiveButton(R.string.yes, (dialog, which) -> {
+            quitOnStop = true;
+            dialog.dismiss();
+            finish();
+        });
+
+        builder.setNegativeButton(R.string.no, (dialog, which) -> dialog.dismiss());
+
+        AlertDialog dialog = builder.create();
+        dialog.show();
+    }
+
+    private void showFourFingerMenu() {
+        runOnUiThread(() -> {
+            boolean gamepadVisible = virtualController != null && virtualController.isControllerVisible();
+
+            CharSequence[] options = new CharSequence[] {
+                "Disconnect",
+                "Quit Game",
+                "Toggle Soft Keyboard",
+                (gamepadVisible ? "Hide Virtual Gamepad" : "Show Virtual Gamepad")
+            };
+
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("Stream Options");
+            builder.setItems(options, (dialog, which) -> {
+                switch (which) {
+                    case 0: // Disconnect
+                        stopConnection();
+                        finish();
+                        break;
+                    case 1: // Quit Game
+                        quit();
+                        break;
+                    case 2: // Toggle soft keyboard
+                        toggleKeyboard();
+                        break;
+                    case 3: // Toggle virtual gamepad
+                        if (virtualController == null) {
+                            virtualController = new VirtualController(controllerHandler, (FrameLayout) streamView.getParent(), Game.this);
+                            virtualController.refreshLayout();
+                        }
+                        virtualController.toggle();
+                        break;
+                }
+            });
+            builder.show();
+        });
     }
 
     private byte getLiTouchTypeFromEvent(MotionEvent event) {
@@ -2026,15 +2127,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 // Special handling for 3 finger gesture
                 if (event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN &&
                         event.getPointerCount() == 3) {
-                    // Three fingers down
                     threeFingerDownTime = event.getEventTime();
-
-                    // Cancel the first and second touches to avoid
-                    // erroneous events
                     for (TouchContext aTouchContext : touchContextMap) {
                         aTouchContext.cancelTouch();
                     }
-
                     return true;
                 }
 
@@ -2064,8 +2160,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                             (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || (event.getFlags() & MotionEvent.FLAG_CANCELED) == 0)) {
                         // All fingers up
                         if (event.getEventTime() - threeFingerDownTime < THREE_FINGER_TAP_THRESHOLD) {
-                            // This is a 3 finger tap to bring up the keyboard
-                            toggleKeyboard();
+                            // This is a 3 finger tap to bring up the stream options menu
+                            showFourFingerMenu();
                             return true;
                         }
                     }

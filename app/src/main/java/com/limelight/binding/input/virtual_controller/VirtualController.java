@@ -129,8 +129,18 @@ public class VirtualController {
         return handler;
     }
 
-    private boolean isControllerVisible() {
+    public boolean isControllerVisible() {
         return buttonConfigure.getVisibility() == View.VISIBLE;
+    }
+
+    public void toggle() {
+        if (currentMode == ControllerMode.Active) {
+            if (isControllerVisible()) {
+                hide();
+            } else {
+                show();
+            }
+        }
     }
 
     public void hide() {
@@ -139,6 +149,9 @@ public class VirtualController {
         }
 
         buttonConfigure.setVisibility(View.INVISIBLE);
+        if (buttonShowHide != null) {
+            buttonShowHide.setVisibility(View.INVISIBLE);
+        }
     }
 
     public void show() {
@@ -147,6 +160,9 @@ public class VirtualController {
         }
 
         buttonConfigure.setVisibility(View.VISIBLE);
+        if (buttonShowHide != null) {
+            buttonShowHide.setVisibility(View.VISIBLE);
+        }
     }
 
     public void removeElements() {
