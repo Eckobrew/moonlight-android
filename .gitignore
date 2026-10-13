@@ -42,3 +42,5 @@ app/.externalNativeBuild/
 
 # NDK stuff
 .cxx/
+.continue/agents/new-config.yaml
+gradle/gradle-daemon-jvm.properties

@@ -311,4 +311,6 @@
     <string name="analogscroll_none">None (both sticks move the mouse)</string>
     <string name="analogscroll_right">Right analog stick</string>
     <string name="analogscroll_left">Left analog stick</string>
+    <string name="title_checkbox_only_paired_pcs">Only show paired PCs</string>
+    <string name="summary_checkbox_only_paired_pcs">Hide computers that have not been paired with this device</string>
 </resources>

@@ -60,6 +60,11 @@
             android:title="@string/title_checkbox_keep_screen_on"
             android:summary="@string/summary_checkbox_keep_screen_on"
             android:defaultValue="true" />
+        <CheckBoxPreference
+            android:key="checkbox_only_paired_pcs"
+            android:title="@string/title_checkbox_only_paired_pcs"
+            android:summary="@string/summary_checkbox_only_paired_pcs"
+            android:defaultValue="false" />
     </PreferenceCategory>
     <PreferenceCategory android:title="@string/category_audio_settings">
         <ListPreference

@@ -307,6 +307,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         UiHelper.showDecoderCrashDialog(this);
 
         inForeground = true;
+        filterPairedPcsIfNeeded();
         startComputerUpdates();
     }
 
@@ -550,9 +551,9 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                     httpConn = new NvHTTP(ServerHelper.getCurrentAddressFromComputer(computer),
                             computer.httpsPort, managerBinder.getUniqueId(), computer.serverCert,
                             PlatformBinding.getCryptoProvider(PcView.this));
-                    if (httpConn.getPairState() == PairingManager.PairState.PAIRED) {
+                    if (httpConn.getPairState() == PairState.PAIRED) {
                         httpConn.unpair();
-                        if (httpConn.getPairState() == PairingManager.PairState.NOT_PAIRED) {
+                        if (httpConn.getPairState() == PairState.NOT_PAIRED) {
                             message = getResources().getString(R.string.unpair_success);
                         }
                         else {
@@ -712,7 +713,48 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         }
     }
     
+    private boolean isComputerPaired(ComputerDetails details) {
+        return details.serverCert != null || details.pairState == PairState.PAIRED;
+    }
+
+    private void filterPairedPcsIfNeeded() {
+        if (pcGridAdapter == null) return;
+        PreferenceConfiguration prefConfig = PreferenceConfiguration.readPreferences(this);
+        if (prefConfig.onlyPairedPcs) {
+            boolean changed = false;
+            for (int i = pcGridAdapter.getCount() - 1; i >= 0; i--) {
+                ComputerObject computer = (ComputerObject) pcGridAdapter.getItem(i);
+                if (!isComputerPaired(computer.details)) {
+                    pcGridAdapter.removeComputer(computer);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                pcGridAdapter.notifyDataSetChanged();
+                if (pcGridAdapter.getCount() == 0) {
+                    noPcFoundLayout.setVisibility(View.VISIBLE);
+                }
+            }
+        }
+    }
+
     private void updateComputer(ComputerDetails details) {
+        PreferenceConfiguration prefConfig = PreferenceConfiguration.readPreferences(this);
+        if (prefConfig.onlyPairedPcs && !isComputerPaired(details)) {
+            for (int i = 0; i < pcGridAdapter.getCount(); i++) {
+                ComputerObject computer = (ComputerObject) pcGridAdapter.getItem(i);
+                if (details.uuid.equals(computer.details.uuid)) {
+                    pcGridAdapter.removeComputer(computer);
+                    break;
+                }
+            }
+            pcGridAdapter.notifyDataSetChanged();
+            if (pcGridAdapter.getCount() == 0) {
+                noPcFoundLayout.setVisibility(View.VISIBLE);
+            }
+            return;
+        }
+
         ComputerObject existingEntry = null;
 
         for (int i = 0; i < pcGridAdapter.getCount(); i++) {
