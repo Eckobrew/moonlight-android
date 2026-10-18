@@ -504,7 +504,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 httpsPort, uniqueId, config,
                 PlatformBinding.getCryptoProvider(this), serverCert);
         controllerHandler = new ControllerHandler(this, conn, this, prefConfig);
-        keyboardTranslator = new KeyboardTranslator();
+        keyboardTranslator = new KeyboardTranslator(prefConfig.swapWinAltKeys);
 
         InputManager inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
         inputManager.registerInputDeviceListener(keyboardTranslator, null);
@@ -1207,11 +1207,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
         else if (androidKeyCode == KeyEvent.KEYCODE_ALT_LEFT ||
                  androidKeyCode == KeyEvent.KEYCODE_ALT_RIGHT) {
-            modifierMask = KeyboardPacket.MODIFIER_ALT;
+            modifierMask = prefConfig.swapWinAltKeys ? KeyboardPacket.MODIFIER_META : KeyboardPacket.MODIFIER_ALT;
         }
         else if (androidKeyCode == KeyEvent.KEYCODE_META_LEFT ||
                 androidKeyCode == KeyEvent.KEYCODE_META_RIGHT) {
-            modifierMask = KeyboardPacket.MODIFIER_META;
+            modifierMask = prefConfig.swapWinAltKeys ? KeyboardPacket.MODIFIER_ALT : KeyboardPacket.MODIFIER_META;
         }
         else {
             nonModifierKeyCode = androidKeyCode;
@@ -1312,10 +1312,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             modifier |= KeyboardPacket.MODIFIER_CTRL;
         }
         if (event.isAltPressed()) {
-            modifier |= KeyboardPacket.MODIFIER_ALT;
+            modifier |= prefConfig.swapWinAltKeys ? KeyboardPacket.MODIFIER_META : KeyboardPacket.MODIFIER_ALT;
         }
         if (event.isMetaPressed()) {
-            modifier |= KeyboardPacket.MODIFIER_META;
+            modifier |= prefConfig.swapWinAltKeys ? KeyboardPacket.MODIFIER_ALT : KeyboardPacket.MODIFIER_META;
         }
         return applyKeySpecificModifiers(event.getKeyCode(), modifier);
     }

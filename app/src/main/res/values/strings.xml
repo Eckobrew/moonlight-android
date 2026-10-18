@@ -313,4 +313,6 @@
     <string name="analogscroll_left">Left analog stick</string>
     <string name="title_checkbox_only_paired_pcs">Only show paired PCs</string>
     <string name="summary_checkbox_only_paired_pcs">Hide computers that have not been paired with this device</string>
+    <string name="title_checkbox_swap_win_alt">Swap Alt and Windows keys</string>
+    <string name="summary_checkbox_swap_win_alt">Swap the Alt and Windows/Command keys for external keyboards</string>
 </resources>

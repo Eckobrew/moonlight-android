@@ -94,8 +94,14 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
     }
 
     private final SparseArray<KeyboardMapping> keyboardMappings = new SparseArray<>();
+    private final boolean swapWinAltKeys;
 
     public KeyboardTranslator() {
+        this(false);
+    }
+
+    public KeyboardTranslator(boolean swapWinAltKeys) {
+        this.swapWinAltKeys = swapWinAltKeys;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             for (int deviceId : InputDevice.getDeviceIds()) {
                 InputDevice device = InputDevice.getDevice(deviceId);
@@ -171,11 +177,11 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
         else {
             switch (keycode) {
             case KeyEvent.KEYCODE_ALT_LEFT:
-                translated = 0xA4;
+                translated = swapWinAltKeys ? 0x5b : 0xA4;
                 break;
 
             case KeyEvent.KEYCODE_ALT_RIGHT:
-                translated = 0xA5;
+                translated = swapWinAltKeys ? 0x5c : 0xA5;
                 break;
                 
             case KeyEvent.KEYCODE_BACKSLASH:
@@ -232,11 +238,11 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
                 break;
 
             case KeyEvent.KEYCODE_META_LEFT:
-                translated = 0x5b;
+                translated = swapWinAltKeys ? 0xA4 : 0x5b;
                 break;
 
             case KeyEvent.KEYCODE_META_RIGHT:
-                translated = 0x5c;
+                translated = swapWinAltKeys ? 0xA5 : 0x5c;
                 break;
 
             case KeyEvent.KEYCODE_MENU:
