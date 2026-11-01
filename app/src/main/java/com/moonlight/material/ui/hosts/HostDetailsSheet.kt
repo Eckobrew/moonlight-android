@@ -78,7 +78,11 @@ fun HostDetailsSheet(
                 DetailRow("Remote HTTP Port", (host.remoteHTTPPort ?: host.httpPort).toString())
                 DetailRow("Remote HTTPS Port", (host.remoteHTTPSPort ?: host.httpsPort).toString())
             }
-            TextButton(onClick = onDiscoverRemoteAddress, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = onDiscoverRemoteAddress,
+                enabled = networkState.isConnected && networkState.connectionType in setOf(
+                    com.moonlight.material.networking.ConnectionType.WIFI,
+                    com.moonlight.material.networking.ConnectionType.ETHERNET),
+                modifier = Modifier.fillMaxWidth()) {
                 Text("Discover Remote Address")
             }
             DetailRow("HTTP Port", host.effectiveHTTPPort.toString())

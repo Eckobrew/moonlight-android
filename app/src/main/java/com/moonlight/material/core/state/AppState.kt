@@ -102,6 +102,13 @@ class AppState(context: Context) : ViewModel() {
         settingsStore.saveSettings(newSettings)
     }
 
+    private fun canDiscoverRemoteOnCurrentNetwork(): Boolean {
+        val network = networkReachability.getCurrentState()
+        return network.isConnected && network.connectionType in setOf(
+            com.moonlight.material.networking.ConnectionType.WIFI,
+            com.moonlight.material.networking.ConnectionType.ETHERNET)
+    }
+
     fun refreshHosts(forceRemoteVerification: Boolean = false) {
         if (_isRefreshingHosts.value) {
             if (forceRemoteVerification) pendingRemoteDiscovery = true
@@ -112,7 +119,7 @@ class AppState(context: Context) : ViewModel() {
             try {
                 for (host in _hosts.value.toList()) {
                     val refreshed = try {
-                        httpClient.fetchServerInfo(host, discoverRemote = true, forceRemoteVerification = forceRemoteVerification).first
+                        httpClient.fetchServerInfo(host, discoverRemote = canDiscoverRemoteOnCurrentNetwork(), forceRemoteVerification = forceRemoteVerification).first
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -204,6 +211,10 @@ class AppState(context: Context) : ViewModel() {
     }
 
     fun discoverRemoteAddress(host: Host) {
+        if (!canDiscoverRemoteOnCurrentNetwork()) {
+            hostActionMessage.value = "Connect to the host's local Wi-Fi or Ethernet network to discover remote access."
+            return
+        }
         viewModelScope.launch {
             try {
                 val updated = httpClient.fetchServerInfo(host, discoverRemote = true, forceRemoteVerification = true).first

@@ -28,7 +28,8 @@ class RemoteAddressDiscovery(
     suspend fun update(host: Host, reportedAddress: String?, reportedHTTPPort: Int?, force: Boolean = false,
         verify: suspend (String, Int, Int) -> Boolean): Host = withContext(Dispatchers.IO) {
         mutex.withLock {
-            if (!host.isSecurelyPaired || host.serverId.isNullOrBlank()) return@withLock host
+            if (!host.isSecurelyPaired || host.serverId.isNullOrBlank() ||
+                host.effectiveAddress != host.address || !isLocal(host.address)) return@withLock host
             val key = "${host.id}:${host.serverCertificateDER}:${host.serverId}:$reportedAddress:$reportedHTTPPort"
             val previous = attempts[key]
             if (!force && previous != null && now() - previous.date < 15_000) {

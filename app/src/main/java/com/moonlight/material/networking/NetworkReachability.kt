@@ -87,10 +87,10 @@ class NetworkReachability(private val context: Context) {
 
         val isConnected = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         val type = when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> ConnectionType.VPN
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> ConnectionType.WIFI
             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> ConnectionType.ETHERNET
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> ConnectionType.CELLULAR
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> ConnectionType.VPN
             else -> ConnectionType.OTHER
         }
 
