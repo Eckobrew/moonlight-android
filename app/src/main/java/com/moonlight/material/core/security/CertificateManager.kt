@@ -1,7 +1,7 @@
 package com.moonlight.material.core.security
 
 import android.content.Context
-import android.util.Base64
+import java.util.Base64
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
@@ -48,7 +48,7 @@ class CertificateManager private constructor(private val context: Context) {
         if (certPem != null && privKeyB64 != null && pubKeyB64 != null) {
             try {
                 val kf = KeyFactory.getInstance("RSA")
-                val privKeyBytes = Base64.decode(privKeyB64, Base64.DEFAULT)
+                val privKeyBytes = Base64.getDecoder().decode(privKeyB64)
                 val privKey = kf.generatePrivate(PKCS8EncodedKeySpec(privKeyBytes))
 
                 val cf = CertificateFactory.getInstance("X.509")
@@ -93,11 +93,11 @@ class CertificateManager private constructor(private val context: Context) {
             val cert = JcaX509CertificateConverter().getCertificate(certHolder)
 
             val certDer = cert.encoded
-            val certB64 = Base64.encodeToString(certDer, Base64.NO_WRAP)
+            val certB64 = Base64.getEncoder().encodeToString(certDer)
             val pem = "-----BEGIN CERTIFICATE-----\n$certB64\n-----END CERTIFICATE-----\n"
 
-            val privKeyB64 = Base64.encodeToString(keyPair.private.encoded, Base64.NO_WRAP)
-            val pubKeyB64 = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
+            val privKeyB64 = Base64.getEncoder().encodeToString(keyPair.private.encoded)
+            val pubKeyB64 = Base64.getEncoder().encodeToString(keyPair.public.encoded)
 
             prefs.edit()
                 .putString("client_cert_pem", pem)

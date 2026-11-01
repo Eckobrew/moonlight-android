@@ -1,7 +1,9 @@
 package com.moonlight.material.stream.input
 
+import android.view.InputDevice
 import android.view.MotionEvent
-import com.moonlight.material.stream.control.ControlProtocol
+import kotlin.math.abs
+import kotlin.math.hypot
 
 interface MouseEventListener {
     fun onMouseMoveRelative(deltaX: Short, deltaY: Short)
@@ -60,7 +62,7 @@ class TouchMouseHandler(
                 } else if (pointerCount == 2) {
                     val dy = (event.y - lastY)
                     val scrollDir = if (reverseScroll) -1 else 1
-                    if (Math.abs(dy) > 10) {
+                    if (abs(dy) > 10) {
                         listener.onMouseScroll((dy * scrollDir / 5).toInt().toShort())
                         lastY = event.y
                     }
@@ -70,11 +72,11 @@ class TouchMouseHandler(
 
             MotionEvent.ACTION_UP -> {
                 val elapsed = System.currentTimeMillis() - downTime
-                val distance = Math.hypot((event.x - lastX).toDouble(), (event.y - lastY).toDouble())
+                val distance = hypot((event.x - lastX).toDouble(), (event.y - lastY).toDouble())
 
                 // Quick tap detection for clicks
                 if (elapsed < 250 && distance < 20) {
-                    val leftBtn = if (swapMouseButtons) ControlProtocol.BUTTON_RIGHT_MOUSE.toByte() else ControlProtocol.BUTTON_LEFT_MOUSE.toByte()
+                    val leftBtn = if (swapMouseButtons) MouseButtonCodes.BUTTON_RIGHT else MouseButtonCodes.BUTTON_LEFT
                     listener.onMouseButton(leftBtn, true)
                     listener.onMouseButton(leftBtn, false)
                 }
@@ -86,7 +88,7 @@ class TouchMouseHandler(
                     val elapsed = System.currentTimeMillis() - downTime
                     if (elapsed < 250) {
                         // Two finger tap = right click
-                        val rightBtn = if (swapMouseButtons) ControlProtocol.BUTTON_LEFT_MOUSE.toByte() else ControlProtocol.BUTTON_RIGHT_MOUSE.toByte()
+                        val rightBtn = if (swapMouseButtons) MouseButtonCodes.BUTTON_LEFT else MouseButtonCodes.BUTTON_RIGHT
                         listener.onMouseButton(rightBtn, true)
                         listener.onMouseButton(rightBtn, false)
                     }
@@ -99,7 +101,7 @@ class TouchMouseHandler(
 
     fun handleGenericMotion(event: MotionEvent): Boolean {
         // Physical Mouse via Bluetooth or USB
-        if (event.isFromSource(android.view.InputDevice.SOURCE_MOUSE)) {
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
             val deltaX = (event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) * mouseSensitivityX).toInt().toShort()
             val deltaY = (event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) * mouseSensitivityY).toInt().toShort()
             if (deltaX.toInt() != 0 || deltaY.toInt() != 0) {

@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.moonlight.material.stream.control.ControlProtocol
+import com.moonlight.material.stream.input.ControllerButtonFlags
 import com.moonlight.material.stream.input.GamepadListener
 import com.moonlight.material.ui.theme.*
 import kotlin.math.cos
@@ -36,6 +36,8 @@ fun VirtualTouchOverlay(
     modifier: Modifier = Modifier
 ) {
     var buttonFlags by remember { mutableStateOf(0) }
+    var leftTrigger by remember { mutableStateOf<Byte>(0) }
+    var rightTrigger by remember { mutableStateOf<Byte>(0) }
     var leftStickX by remember { mutableStateOf<Short>(0) }
     var leftStickY by remember { mutableStateOf<Short>(0) }
     var rightStickX by remember { mutableStateOf<Short>(0) }
@@ -45,8 +47,8 @@ fun VirtualTouchOverlay(
         listener.onControllerStateChanged(
             controllerNumber = 0,
             buttonFlags = buttonFlags,
-            leftTrigger = 0,
-            rightTrigger = 0,
+            leftTrigger = leftTrigger,
+            rightTrigger = rightTrigger,
             leftStickX = leftStickX,
             leftStickY = leftStickY,
             rightStickX = rightStickX,
@@ -71,11 +73,11 @@ fun VirtualTouchOverlay(
             // Left Bumpers
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TouchActionButton("LT", 60.dp, 36.dp) { isDown ->
-                    buttonFlags = if (isDown) buttonFlags or ControlProtocol.BUTTON_LB else buttonFlags and ControlProtocol.BUTTON_LB.inv()
+                    leftTrigger = if (isDown) 255.toByte() else 0.toByte()
                     updateController()
                 }
                 TouchActionButton("LB", 60.dp, 36.dp) { isDown ->
-                    buttonFlags = if (isDown) buttonFlags or ControlProtocol.BUTTON_LB else buttonFlags and ControlProtocol.BUTTON_LB.inv()
+                    buttonFlags = if (isDown) buttonFlags or ControllerButtonFlags.LB else buttonFlags and ControllerButtonFlags.LB.inv()
                     updateController()
                 }
             }
@@ -83,11 +85,11 @@ fun VirtualTouchOverlay(
             // Center Start / Select
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 TouchActionButton("SELECT", 64.dp, 32.dp) { isDown ->
-                    buttonFlags = if (isDown) buttonFlags or ControlProtocol.BUTTON_BACK else buttonFlags and ControlProtocol.BUTTON_BACK.inv()
+                    buttonFlags = if (isDown) buttonFlags or ControllerButtonFlags.BACK else buttonFlags and ControllerButtonFlags.BACK.inv()
                     updateController()
                 }
                 TouchActionButton("START", 64.dp, 32.dp) { isDown ->
-                    buttonFlags = if (isDown) buttonFlags or ControlProtocol.BUTTON_START else buttonFlags and ControlProtocol.BUTTON_START.inv()
+                    buttonFlags = if (isDown) buttonFlags or ControllerButtonFlags.START else buttonFlags and ControllerButtonFlags.START.inv()
                     updateController()
                 }
             }
@@ -95,11 +97,11 @@ fun VirtualTouchOverlay(
             // Right Bumpers
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TouchActionButton("RB", 60.dp, 36.dp) { isDown ->
-                    buttonFlags = if (isDown) buttonFlags or ControlProtocol.BUTTON_RB else buttonFlags and ControlProtocol.BUTTON_RB.inv()
+                    buttonFlags = if (isDown) buttonFlags or ControllerButtonFlags.RB else buttonFlags and ControllerButtonFlags.RB.inv()
                     updateController()
                 }
                 TouchActionButton("RT", 60.dp, 36.dp) { isDown ->
-                    buttonFlags = if (isDown) buttonFlags or ControlProtocol.BUTTON_RB else buttonFlags and ControlProtocol.BUTTON_RB.inv()
+                    rightTrigger = if (isDown) 255.toByte() else 0.toByte()
                     updateController()
                 }
             }
@@ -128,10 +130,10 @@ fun VirtualTouchOverlay(
                 .padding(end = 24.dp, bottom = 24.dp)
                 .size(150.dp)
         ) {
-            val aButton = if (swapFaceButtons) ControlProtocol.BUTTON_B else ControlProtocol.BUTTON_A
-            val bButton = if (swapFaceButtons) ControlProtocol.BUTTON_A else ControlProtocol.BUTTON_B
-            val xButton = if (swapFaceButtons) ControlProtocol.BUTTON_Y else ControlProtocol.BUTTON_X
-            val yButton = if (swapFaceButtons) ControlProtocol.BUTTON_X else ControlProtocol.BUTTON_Y
+            val aButton = if (swapFaceButtons) ControllerButtonFlags.B else ControllerButtonFlags.A
+            val bButton = if (swapFaceButtons) ControllerButtonFlags.A else ControllerButtonFlags.B
+            val xButton = if (swapFaceButtons) ControllerButtonFlags.Y else ControllerButtonFlags.X
+            val yButton = if (swapFaceButtons) ControllerButtonFlags.X else ControllerButtonFlags.Y
 
             // Y (Top)
             Box(modifier = Modifier.align(Alignment.TopCenter)) {

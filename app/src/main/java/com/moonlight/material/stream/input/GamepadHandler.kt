@@ -6,7 +6,6 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import com.moonlight.material.core.utils.AppLogger
-import com.moonlight.material.stream.control.ControlProtocol
 import kotlin.math.abs
 
 interface GamepadListener {
@@ -51,8 +50,7 @@ class GamepadHandler(
 
     fun handleGenericMotionEvent(event: MotionEvent): Boolean {
         if ((event.source and InputDevice.SOURCE_JOYSTICK) != InputDevice.SOURCE_JOYSTICK &&
-            (event.source and InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD
-        ) {
+            (event.source and InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD) {
             return false
         }
 
@@ -70,11 +68,11 @@ class GamepadHandler(
         val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
         val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
 
-        buttonFlags = buttonFlags and (ControlProtocol.BUTTON_UP or ControlProtocol.BUTTON_DOWN or ControlProtocol.BUTTON_LEFT or ControlProtocol.BUTTON_RIGHT).inv()
-        if (hatY < -0.5f) buttonFlags = buttonFlags or ControlProtocol.BUTTON_UP
-        if (hatY > 0.5f) buttonFlags = buttonFlags or ControlProtocol.BUTTON_DOWN
-        if (hatX < -0.5f) buttonFlags = buttonFlags or ControlProtocol.BUTTON_LEFT
-        if (hatX > 0.5f) buttonFlags = buttonFlags or ControlProtocol.BUTTON_RIGHT
+        buttonFlags = buttonFlags and (ControllerButtonFlags.UP or ControllerButtonFlags.DOWN or ControllerButtonFlags.LEFT or ControllerButtonFlags.RIGHT).inv()
+        if (hatY < -0.5f) buttonFlags = buttonFlags or ControllerButtonFlags.UP
+        if (hatY > 0.5f) buttonFlags = buttonFlags or ControllerButtonFlags.DOWN
+        if (hatX < -0.5f) buttonFlags = buttonFlags or ControllerButtonFlags.LEFT
+        if (hatX > 0.5f) buttonFlags = buttonFlags or ControllerButtonFlags.RIGHT
 
         leftTrigger = (lt.coerceIn(0f, 1f) * 255).toInt().toByte()
         rightTrigger = (rt.coerceIn(0f, 1f) * 255).toInt().toByte()
@@ -116,11 +114,11 @@ class GamepadHandler(
         if (isMouseEmulationMode) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BUTTON_A -> {
-                    listener.onEmulatedMouseButton(ControlProtocol.BUTTON_LEFT_MOUSE.toByte(), isDown)
+                    listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_LEFT, isDown)
                     return true
                 }
                 KeyEvent.KEYCODE_BUTTON_B -> {
-                    listener.onEmulatedMouseButton(ControlProtocol.BUTTON_RIGHT_MOUSE.toByte(), isDown)
+                    listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_RIGHT, isDown)
                     return true
                 }
             }
@@ -140,21 +138,21 @@ class GamepadHandler(
 
     private fun mapKeyCodeToButton(keyCode: Int): Int? {
         return when (keyCode) {
-            KeyEvent.KEYCODE_BUTTON_A -> if (swapFaceButtons) ControlProtocol.BUTTON_B else ControlProtocol.BUTTON_A
-            KeyEvent.KEYCODE_BUTTON_B -> if (swapFaceButtons) ControlProtocol.BUTTON_A else ControlProtocol.BUTTON_B
-            KeyEvent.KEYCODE_BUTTON_X -> if (swapFaceButtons) ControlProtocol.BUTTON_Y else ControlProtocol.BUTTON_X
-            KeyEvent.KEYCODE_BUTTON_Y -> if (swapFaceButtons) ControlProtocol.BUTTON_X else ControlProtocol.BUTTON_Y
-            KeyEvent.KEYCODE_BUTTON_L1 -> ControlProtocol.BUTTON_LB
-            KeyEvent.KEYCODE_BUTTON_R1 -> ControlProtocol.BUTTON_RB
-            KeyEvent.KEYCODE_BUTTON_THUMBL -> ControlProtocol.BUTTON_LS
-            KeyEvent.KEYCODE_BUTTON_THUMBR -> ControlProtocol.BUTTON_RS
-            KeyEvent.KEYCODE_BUTTON_START -> ControlProtocol.BUTTON_START
-            KeyEvent.KEYCODE_BUTTON_SELECT -> ControlProtocol.BUTTON_BACK
-            KeyEvent.KEYCODE_BUTTON_MODE -> ControlProtocol.BUTTON_GUIDE
-            KeyEvent.KEYCODE_DPAD_UP -> ControlProtocol.BUTTON_UP
-            KeyEvent.KEYCODE_DPAD_DOWN -> ControlProtocol.BUTTON_DOWN
-            KeyEvent.KEYCODE_DPAD_LEFT -> ControlProtocol.BUTTON_LEFT
-            KeyEvent.KEYCODE_DPAD_RIGHT -> ControlProtocol.BUTTON_RIGHT
+            KeyEvent.KEYCODE_BUTTON_A -> if (swapFaceButtons) ControllerButtonFlags.B else ControllerButtonFlags.A
+            KeyEvent.KEYCODE_BUTTON_B -> if (swapFaceButtons) ControllerButtonFlags.A else ControllerButtonFlags.B
+            KeyEvent.KEYCODE_BUTTON_X -> if (swapFaceButtons) ControllerButtonFlags.Y else ControllerButtonFlags.X
+            KeyEvent.KEYCODE_BUTTON_Y -> if (swapFaceButtons) ControllerButtonFlags.X else ControllerButtonFlags.Y
+            KeyEvent.KEYCODE_BUTTON_L1 -> ControllerButtonFlags.LB
+            KeyEvent.KEYCODE_BUTTON_R1 -> ControllerButtonFlags.RB
+            KeyEvent.KEYCODE_BUTTON_THUMBL -> ControllerButtonFlags.LS_CLK
+            KeyEvent.KEYCODE_BUTTON_THUMBR -> ControllerButtonFlags.RS_CLK
+            KeyEvent.KEYCODE_BUTTON_START -> ControllerButtonFlags.START
+            KeyEvent.KEYCODE_BUTTON_SELECT -> ControllerButtonFlags.BACK
+            KeyEvent.KEYCODE_BUTTON_MODE -> ControllerButtonFlags.SPECIAL
+            KeyEvent.KEYCODE_DPAD_UP -> ControllerButtonFlags.UP
+            KeyEvent.KEYCODE_DPAD_DOWN -> ControllerButtonFlags.DOWN
+            KeyEvent.KEYCODE_DPAD_LEFT -> ControllerButtonFlags.LEFT
+            KeyEvent.KEYCODE_DPAD_RIGHT -> ControllerButtonFlags.RIGHT
             else -> null
         }
     }

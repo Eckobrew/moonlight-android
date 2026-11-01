@@ -76,6 +76,15 @@ class StreamActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE) {
+            return super.onKeyDown(keyCode, event)
+        }
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (::sessionController.isInitialized && sessionController.isStreaming.value) {
+                sessionController.openSessionControls()
+                return true
+            }
+        }
         if (::sessionController.isInitialized) {
             if (sessionController.gamepadHandler.handleKeyEvent(event)) {
                 return true
@@ -87,6 +96,12 @@ class StreamActivity : ComponentActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE) {
+            return super.onKeyUp(keyCode, event)
+        }
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            return true
+        }
         if (::sessionController.isInitialized) {
             if (sessionController.gamepadHandler.handleKeyEvent(event)) {
                 return true

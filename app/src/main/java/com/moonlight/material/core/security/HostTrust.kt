@@ -1,6 +1,5 @@
 package com.moonlight.material.core.security
 
-import android.util.Base64
 import java.io.ByteArrayInputStream
 import java.security.KeyStore
 import java.security.Signature
@@ -8,11 +7,14 @@ import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.Arrays
+import java.util.Base64
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+
+class HostTrustException(message: String) : CertificateException(message)
 
 object HostTrust {
 
@@ -24,7 +26,7 @@ object HostTrust {
                 .replace("\r", "")
                 .replace("\n", "")
                 .trim()
-            Base64.decode(clean, Base64.DEFAULT)
+            Base64.getDecoder().decode(clean)
         } catch (e: Exception) {
             null
         }
@@ -46,6 +48,7 @@ object HostTrust {
 
     /**
      * Verifies RSA-SHA256 signature on server secret using the server's public key from certificateDER.
+     * Matches HostTrust.swift:verify
      */
     fun verify(secret: ByteArray, signature: ByteArray, certificateDER: ByteArray): Boolean {
         return try {
@@ -60,24 +63,25 @@ object HostTrust {
     }
 
     /**
-     * Creates an X509TrustManager pinned to a specific server certificate DER, or allowing all for initial pairing.
+     * Creates an X509TrustManager pinned strictly to a specific server certificate DER.
+     * FAILS CLOSED if pinnedCertificateDER is null or invalid.
+     * Matches PinnedHostDelegate in HostTrust.swift:92-105.
      */
     fun createPinnedTrustManager(pinnedCertificateDER: ByteArray?): X509TrustManager {
         return object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
 
             override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-                if (pinnedCertificateDER == null) {
-                    // In pairing phase stage 1-4, unpinned connection
-                    return
+                if (pinnedCertificateDER == null || pinnedCertificateDER.isEmpty()) {
+                    throw HostTrustException("HTTPS connection rejected: No pinned certificate provided for host (fail closed).")
                 }
                 if (chain.isNullOrEmpty()) {
-                    throw CertificateException("Empty server certificate chain")
+                    throw HostTrustException("HTTPS connection rejected: Empty server certificate chain.")
                 }
                 val serverCert = chain[0]
                 val serverDer = serverCert.encoded
                 if (!Arrays.equals(serverDer, pinnedCertificateDER)) {
-                    throw CertificateException("Pinned certificate does not match host certificate!")
+                    throw HostTrustException("Pinned certificate does not match host certificate!")
                 }
             }
 
@@ -87,6 +91,8 @@ object HostTrust {
 
     /**
      * Builds SSLSocketFactory with mTLS (client certificate + private key) and server certificate pinning.
+     * If pinnedCertificateDER is null, mTLS identity is never sent and trust manager fails closed.
+     * Matches HostTrust.swift:106-112.
      */
     fun createPinnedSSLSocketFactory(
         pinnedCertificateDER: ByteArray?,
@@ -97,19 +103,25 @@ object HostTrust {
         val clientCert = certManager.getClientCertificate()
         val clientKey = certManager.getClientPrivateKey()
 
-        val keyManagers = if (clientCert != null && clientKey != null) {
-            val keyStore = KeyStore.getInstance(KeyStore.getDefaultType())
-            keyStore.load(null, null)
-            keyStore.setKeyEntry("client", clientKey, "".toCharArray(), arrayOf(clientCert))
-            val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
-            kmf.init(keyStore, "".toCharArray())
+        // Send client identity ONLY when a pinned certificate exists (HostTrust.swift:107)
+        val keyManagers = if (pinnedCertificateDER != null && clientCert != null && clientKey != null) {
+            val keyStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+                load(null, null)
+                setCertificateEntry("cert", clientCert)
+                setKeyEntry("key", clientKey, "".toCharArray(), arrayOf(clientCert))
+            }
+            val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply {
+                init(keyStore, "".toCharArray())
+            }
             kmf.keyManagers
         } else {
             null
         }
 
-        val sslContext = SSLContext.getInstance("TLS")
-        sslContext.init(keyManagers, arrayOf<TrustManager>(trustManager), null)
+        val sslContext = SSLContext.getInstance("TLS").apply {
+            init(keyManagers, arrayOf<TrustManager>(trustManager), null)
+        }
+
         return Pair(sslContext.socketFactory, trustManager)
     }
 }

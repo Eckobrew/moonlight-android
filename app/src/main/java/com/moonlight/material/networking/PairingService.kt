@@ -1,6 +1,6 @@
 package com.moonlight.material.networking
 
-import android.util.Base64
+import java.util.Base64
 import com.moonlight.material.core.models.Host
 import com.moonlight.material.core.security.CertificateManager
 import com.moonlight.material.core.security.CryptoUtils
@@ -186,7 +186,7 @@ class PairingService(
                 throw IOException("Stage 5 failed: $msg")
             }
 
-            val serverCertBase64 = Base64.encodeToString(serverCertDER, Base64.NO_WRAP)
+            val serverCertBase64 = Base64.getEncoder().encodeToString(serverCertDER)
             val candidate = host.copy(
                 isPaired = true,
                 serverCertificateDER = serverCertBase64

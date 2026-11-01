@@ -8,31 +8,23 @@ import com.moonlight.material.core.models.StreamApp
 import com.moonlight.material.core.models.StreamSettings
 import com.moonlight.material.core.security.CryptoUtils
 import com.moonlight.material.core.utils.AppLogger
+import com.moonlight.material.core.utils.ConnectionDiagnostics
 import com.moonlight.material.networking.SunshineHTTPClient
 import com.moonlight.material.stream.audio.AudioPlaybackEngine
-import com.moonlight.material.stream.control.ControlProtocol
 import com.moonlight.material.stream.input.GamepadHandler
 import com.moonlight.material.stream.input.GamepadListener
 import com.moonlight.material.stream.input.MouseEventListener
 import com.moonlight.material.stream.input.TouchMouseHandler
-import com.moonlight.material.stream.rtsp.RtspHandshakeResult
-import com.moonlight.material.stream.rtsp.RtspSession
 import com.moonlight.material.stream.video.MediaCodecDecoder
 import com.moonlight.material.stream.video.VideoDecoderListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.Socket
+import java.util.UUID
 
 class StreamSessionController(
     private val httpClient: SunshineHTTPClient
@@ -53,6 +45,9 @@ class StreamSessionController(
     private val _sessionError = MutableStateFlow<String?>(null)
     val sessionError: StateFlow<String?> = _sessionError.asStateFlow()
 
+    private val _connectionWarning = MutableStateFlow<String?>(null)
+    val connectionWarning: StateFlow<String?> = _connectionWarning.asStateFlow()
+
     private val _metrics = MutableStateFlow(PerformanceMetrics())
     val metrics: StateFlow<PerformanceMetrics> = _metrics.asStateFlow()
 
@@ -71,6 +66,12 @@ class StreamSessionController(
     private val _showHostStatistics = MutableStateFlow(false)
     val showHostStatistics: StateFlow<Boolean> = _showHostStatistics.asStateFlow()
 
+    private val _hostControlMessage = MutableStateFlow<String?>(null)
+    val hostControlMessage: StateFlow<String?> = _hostControlMessage.asStateFlow()
+
+    private val _showSessionControls = MutableStateFlow(false)
+    val showSessionControls: StateFlow<Boolean> = _showSessionControls.asStateFlow()
+
     var activeHost: Host? = null
         private set
     var activeApp: StreamApp? = null
@@ -80,17 +81,23 @@ class StreamSessionController(
 
     private var videoDecoder: MediaCodecDecoder? = null
     private var audioEngine: AudioPlaybackEngine? = null
-    private var rtspSession: RtspSession? = null
 
     val gamepadHandler = GamepadHandler(this)
     val touchMouseHandler = TouchMouseHandler(this)
 
-    private var inputSocket: DatagramSocket? = null
-    private var controlAddress: InetAddress? = null
-    private var controlPort: Int = 47999
+    private var sessionGeneration: Long = 0
+    private var didLaunchHostApp = false
+    private var preserveHostApplication = false
+    var isRemoteMonitorSession = false
+        private set
+    var isShortcutMode = false
 
-    private var metricsJob: Job? = null
-    private var keepaliveJob: Job? = null
+    var onSessionStarted: (() -> Unit)? = null
+    var onSessionStopped: (() -> Unit)? = null
+
+    val shouldQuitHostAppOnStop: Boolean
+        get() = !isRemoteMonitorSession && !preserveHostApplication &&
+                (if (isShortcutMode) didLaunchHostApp else activeSettings?.quitAppOnStop == true)
 
     fun togglePerformanceOverlay() {
         _showPerformanceOverlay.value = !_showPerformanceOverlay.value
@@ -98,6 +105,52 @@ class StreamSessionController(
 
     fun toggleHostStatistics() {
         _showHostStatistics.value = !_showHostStatistics.value
+        if (!_showHostStatistics.value) {
+            _hostStatistics.value = null
+        }
+    }
+
+    fun openSessionControls() {
+        if (_isStreaming.value && _currentStageName.value == "Connected") {
+            _showSessionControls.value = true
+        }
+    }
+
+    fun closeSessionControls() {
+        _showSessionControls.value = false
+    }
+
+    fun clearError() {
+        _sessionError.value = null
+    }
+
+    fun updateStage(stage: Int, name: String) {
+        if (!_isStreaming.value) return
+        _currentStage.value = stage
+        _currentStageName.value = name
+    }
+
+    fun markConnected() {
+        if (!_isStreaming.value || _currentStageName.value == "Connected") return
+        _currentStageName.value = "Connected"
+    }
+
+    fun handleStageFailed(stage: Int, code: Int) {
+        if (!_isStreaming.value) return
+        _sessionError.value = ConnectionDiagnostics.stageFailure(stage, code)
+        stopSession()
+    }
+
+    fun handleTerminated(code: Int) {
+        if (!_isStreaming.value) return
+        _sessionError.value = ConnectionDiagnostics.termination(code)
+        stopSession()
+    }
+
+    fun updateConnectionStatus(status: Int) {
+        if (!_isStreaming.value) return
+        // Matches StreamSessionController.swift:243
+        _connectionWarning.value = if (status == -1) "Network quality is poor. Try lowering the bitrate." else null
     }
 
     fun startSession(
@@ -108,73 +161,68 @@ class StreamSessionController(
     ) {
         if (_isStreaming.value) return
 
-        activeHost = host
-        activeApp = app
-        activeSettings = settings
-        _isStreaming.value = true
-        _sessionError.value = null
-        _currentStage.value = 1
-        _currentStageName.value = "Requesting session from host…"
+        val validationMsg = settings.validationMessage
+        if (validationMsg != null) {
+            _sessionError.value = validationMsg
+            onSessionStopped?.invoke()
+            return
+        }
 
-        val rikey = CryptoUtils.randomBytes(16)
-        val rikeyId = (1L..0xFFFFFFFFL).random()
-        val rikeyHex = CryptoUtils.hexString(rikey)
+        sessionGeneration++
+        val generation = sessionGeneration
 
-        scope.launch(Dispatchers.IO) {
+        scope.launch(Dispatchers.Main) {
             try {
-                // 1. Launch or resume app via Sunshine HTTP
-                val sessionUrl: String? = if (app.matchesRunning(host) || app.control?.id == 1) {
-                    httpClient.resumeApp(host, settings, rikeyHex, rikeyId)
+                activeHost = host
+                activeApp = app
+                activeSettings = settings
+                _isStreaming.value = true
+                _sessionError.value = null
+                _connectionWarning.value = null
+                _currentStage.value = 1
+                _currentStageName.value = "Requesting session from host..."
+                onSessionStarted?.invoke()
+
+                // Generate 16-byte random key for remote input AES encryption
+                // Reference: StreamSessionController.swift:328-330
+                val rikey = CryptoUtils.randomBytes(16)
+                val rikeyId = (1L..0xFFFFFFFFL).random().toInt()
+                val rikeyHex = CryptoUtils.hexString(rikey)
+
+                // Resolve serverinfo to ensure host is ready
+                val (updatedHost, _) = httpClient.fetchServerInfo(host)
+                if (!_isStreaming.value || sessionGeneration != generation) return@launch
+                activeHost = updatedHost
+
+                // Launch or Resume decision matching StreamSessionController.swift:339-355
+                val sessionUrl: String?
+                if (app.matchesRunning(updatedHost) || app.control?.id == 1) {
+                    preserveHostApplication = true
+                    sessionUrl = httpClient.resumeApp(
+                        host = updatedHost,
+                        settings = settings,
+                        rikey = rikeyHex,
+                        rikeyId = rikeyId
+                    )
                 } else {
-                    httpClient.launchApp(host, app.id, app.uuid, settings, rikeyHex, rikeyId)
+                    preserveHostApplication = false
+                    sessionUrl = httpClient.launchApp(
+                        host = updatedHost,
+                        appId = app.id,
+                        appUUID = app.uuid,
+                        settings = settings,
+                        rikey = rikeyHex,
+                        rikeyId = rikeyId
+                    )
+                    didLaunchHostApp = true
                 }
+
+                if (!_isStreaming.value || sessionGeneration != generation) return@launch
 
                 _currentStage.value = 2
-                _currentStageName.value = "Negotiating RTSP stream…"
+                _currentStageName.value = "Starting stream connection..."
 
-                // 2. Perform RTSP Handshake
-                val rtsp = RtspSession(host.effectiveAddress, 48010)
-                rtspSession = rtsp
-                val handshakeResult = rtsp.performHandshake()
-
-                controlAddress = InetAddress.getByName(host.effectiveAddress)
-                controlPort = handshakeResult.controlPort
-                inputSocket = DatagramSocket()
-
-                _currentStage.value = 3
-                _currentStageName.value = "Starting low-latency video and audio…"
-
-                // 3. Start Video Decoder
-                videoDecoder = MediaCodecDecoder(
-                    surface = surface,
-                    width = settings.width,
-                    height = settings.height,
-                    fps = settings.fps,
-                    codec = settings.codec,
-                    enableHdr = settings.enableHdr,
-                    listener = this@StreamSessionController
-                ).apply { start() }
-
-                // 4. Start Audio Engine
-                audioEngine = AudioPlaybackEngine().apply {
-                    start(settings.audioMode, settings.muteAudioOnFocusLoss)
-                }
-
-                // 5. Configure input
-                gamepadHandler.swapFaceButtons = settings.features.swapFaceButtons
-                gamepadHandler.gamepadMouseEnabled = settings.features.gamepadMouse
-                touchMouseHandler.isDesktopMouseMode = settings.features.desktopMouse
-                touchMouseHandler.mouseSensitivityX = settings.mouseSensitivityX
-                touchMouseHandler.mouseSensitivityY = settings.mouseSensitivityY
-                touchMouseHandler.swapMouseButtons = settings.features.swapMouseButtons
-                touchMouseHandler.reverseScroll = settings.features.reverseScroll
-
-                _runtimeBitrateKbps.value = settings.streamBitrateKbps(isRemote = false)
-                _currentStage.value = 4
-                _currentStageName.value = "Connected"
-                AppLogger.info("Stream connected successfully!", TAG)
-
-                startKeepAliveAndMetrics()
+                // The native Limelight connection (LiStartConnection) will be initiated here in M3.
 
             } catch (e: Exception) {
                 AppLogger.error("Failed to start session: ${e.message}", TAG)
@@ -184,86 +232,67 @@ class StreamSessionController(
         }
     }
 
-    private fun startKeepAliveAndMetrics() {
-        // Keepalive / Ping Loop
-        keepaliveJob = scope.launch(Dispatchers.IO) {
-            while (isActive && _isStreaming.value) {
-                sendPing()
-                delay(1000)
-            }
-        }
+    fun stopSession() {
+        sessionGeneration++
+        val hostToQuit = activeHost
+        val shouldQuit = shouldQuitHostAppOnStop
 
-        // Metrics polling loop for Performance HUD
-        metricsJob = scope.launch(Dispatchers.Main) {
-            while (isActive && _isStreaming.value) {
-                val curFps = videoDecoder?.currentFps ?: 0.0
-                val targetFps = activeSettings?.fps ?: 60
-                val resolutionStr = "${activeSettings?.width ?: 1920}x${activeSettings?.height ?: 1080}"
-                val codecStr = activeSettings?.codec?.displayName ?: "H.264"
-                val bitrateMb = _runtimeBitrateKbps.value / 1000.0
+        if (!_isStreaming.value) return
+        _isStreaming.value = false
+        onSessionStopped?.invoke()
 
-                _metrics.value = _metrics.value.copy(
-                    currentFps = curFps,
-                    targetFps = targetFps,
-                    resolution = resolutionStr,
-                    currentCodec = codecStr,
-                    bitrateMbps = bitrateMb,
-                    vsyncEnabled = activeSettings?.enableVsync ?: true,
-                    pacingEnabled = activeSettings?.enableFramePacing ?: true
-                )
-                delay(500)
+        _currentStage.value = 0
+        _currentStageName.value = ""
+        _showSessionControls.value = false
+        _runtimeBitrateSupported.value = false
+        _hostStatistics.value = null
+
+        videoDecoder?.stop()
+        videoDecoder = null
+        audioEngine?.stop()
+        audioEngine = null
+
+        if (hostToQuit != null && shouldQuit) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    httpClient.quitApp(hostToQuit)
+                } catch (e: Exception) {
+                    AppLogger.error("Failed to quit app on host: ${e.message}", TAG)
+                }
             }
         }
     }
 
-    private fun sendPing() {
-        val pingPacket = ByteArray(4) { 0 }
-        sendControlPacket(pingPacket)
-    }
-
-    private fun sendControlPacket(data: ByteArray) {
-        val socket = inputSocket ?: return
-        val addr = controlAddress ?: return
-        scope.launch(Dispatchers.IO) {
-            try {
-                val packet = DatagramPacket(data, data.size, addr, controlPort)
-                socket.send(packet)
-            } catch (e: Exception) {
-                // Ignore transient send errors
-            }
-        }
+    fun sendKeyboardEvent(keyCode: Short, isDown: Boolean, modifiers: Byte = 0, flags: Byte = 0) {
+        // Forwarded via native LiSendKeyboardEvent2 in M6
     }
 
     fun applyRuntimeBitrate(mbps: Double) {
+        val host = activeHost ?: return
+        if (mbps <= 0.0) return
         val kbps = (mbps * 1000).toInt()
-        _runtimeBitrateKbps.value = kbps
-        AppLogger.info("Applied runtime bitrate: $mbps Mbps", TAG)
-    }
-
-    fun sendKeyboardEvent(keyCode: Short, isDown: Boolean) {
-        val packet = ControlProtocol.createKeyboardPacket(keyCode, isDown)
-        sendControlPacket(packet)
-    }
-
-    fun sendClipboardText(text: String) {
-        val packet = ControlProtocol.createUtf8TextPacket(text)
-        sendControlPacket(packet)
-        AppLogger.info("Sent clipboard text: ${text.take(30)}…", TAG)
+        scope.launch(Dispatchers.IO) {
+            try {
+                _runtimeBitrateKbps.value = kbps
+                _hostControlMessage.value = "Bitrate set to ${mbps} Mbps"
+            } catch (e: Exception) {
+                _hostControlMessage.value = e.message
+            }
+        }
     }
 
     // VideoDecoderListener
     override fun onFrameDecoded(decodeTimeMs: Double) {
-        _metrics.value = _metrics.value.copy(decodeTimeMs = decodeTimeMs)
+        // Will be updated from real decoder metrics
     }
 
     override fun onFrameDropped() {
-        _metrics.value = _metrics.value.copy(
-            networkDroppedFrames = _metrics.value.networkDroppedFrames + 1
-        )
+        // Will be updated from real decoder metrics
     }
 
     override fun onDecoderError(error: String) {
-        _sessionError.value = "Video decoder error: $error"
+        _sessionError.value = error
+        stopSession()
     }
 
     // GamepadListener
@@ -277,79 +306,35 @@ class StreamSessionController(
         rightStickX: Short,
         rightStickY: Short
     ) {
-        val packet = ControlProtocol.createControllerPacket(
-            controllerNumber,
-            buttonFlags,
-            leftTrigger,
-            rightTrigger,
-            leftStickX,
-            leftStickY,
-            rightStickX,
-            rightStickY
-        )
-        sendControlPacket(packet)
+        // Forwarded via native LiSendMultiControllerEvent in M6
     }
 
     override fun onEmulatedMouseMove(deltaX: Short, deltaY: Short) {
-        onMouseMoveRelative(deltaX, deltaY)
+        // Forwarded via native LiSendMouseMoveEvent in M6
     }
 
     override fun onEmulatedMouseButton(button: Byte, isDown: Boolean) {
-        onMouseButton(button, isDown)
+        // Forwarded via native LiSendMouseButtonEvent in M6
     }
 
     override fun onEmulatedMouseScroll(scroll: Short) {
-        onMouseScroll(scroll)
+        // Forwarded via native LiSendHighResScrollEvent in M6
     }
 
     // MouseEventListener
     override fun onMouseMoveRelative(deltaX: Short, deltaY: Short) {
-        val packet = ControlProtocol.createMouseMoveRelativePacket(deltaX, deltaY)
-        sendControlPacket(packet)
+        // Forwarded via native LiSendMouseMoveEvent in M6
     }
 
     override fun onMouseMoveAbsolute(x: Short, y: Short, screenW: Short, screenH: Short) {
-        val packet = ControlProtocol.createMouseMoveAbsolutePacket(x, y, screenW, screenH)
-        sendControlPacket(packet)
+        // Forwarded via native LiSendMousePositionEvent in M6
     }
 
     override fun onMouseButton(button: Byte, isDown: Boolean) {
-        val packet = ControlProtocol.createMouseButtonPacket(button, isDown)
-        sendControlPacket(packet)
+        // Forwarded via native LiSendMouseButtonEvent in M6
     }
 
     override fun onMouseScroll(amount: Short) {
-        val packet = ControlProtocol.createMouseScrollPacket(amount)
-        sendControlPacket(packet)
-    }
-
-    fun stopSession() {
-        _isStreaming.value = false
-        _currentStageName.value = "Disconnected"
-        metricsJob?.cancel()
-        metricsJob = null
-        keepaliveJob?.cancel()
-        keepaliveJob = null
-
-        videoDecoder?.stop()
-        videoDecoder = null
-
-        audioEngine?.stop()
-        audioEngine = null
-
-        rtspSession?.teardown()
-        rtspSession = null
-
-        try { inputSocket?.close() } catch (e: Exception) {}
-        inputSocket = null
-
-        val host = activeHost
-        val app = activeApp
-        val quitOnStop = activeSettings?.quitAppOnStop == true
-        if (host != null && app != null && quitOnStop) {
-            scope.launch(Dispatchers.IO) {
-                httpClient.quitApp(host)
-            }
-        }
+        // Forwarded via native LiSendHighResScrollEvent in M6
     }
 }

@@ -3,7 +3,10 @@ package com.moonlight.material
 import com.moonlight.material.core.models.AudioConfigurationMode
 import com.moonlight.material.core.models.StreamSettings
 import com.moonlight.material.core.models.VideoCodec
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StreamConfigurationTest {
@@ -42,14 +45,28 @@ class StreamConfigurationTest {
         assertNotNull(outOfBoundsFps.validationMessage)
     }
 
+    /**
+     * Port of StreamConfigurationTests.swift:codecMasksRespectHdrPreference
+     */
+    @Test
+    fun codecMasksRespectHdrPreference() {
+        val videoFormatMask10Bit = 0x0004 or 0x0020 // HEVC Main10, AV1 Main10
+        val videoFormatH265Main10 = 0x0004
+
+        for (codec in listOf(VideoCodec.AUTO, VideoCodec.H264, VideoCodec.HEVC)) {
+            val mask = codec.limelightMask(enableHdr = false)
+            assertEquals(0, mask and videoFormatMask10Bit)
+        }
+
+        val hevcHdrMask = VideoCodec.HEVC.limelightMask(enableHdr = true)
+        assertTrue((hevcHdrMask and videoFormatH265Main10) != 0)
+    }
+
     @Test
     fun testLimelightMasks() {
         val autoMask = VideoCodec.AUTO.limelightMask(enableHdr = false)
         assertTrue((autoMask and 0x0001) != 0) // H264
         assertTrue((autoMask and 0x0002) != 0) // HEVC
-
-        val hdrMask = VideoCodec.HEVC.limelightMask(enableHdr = true)
-        assertTrue((hdrMask and 0x0004) != 0) // HEVC Main10
 
         val audioStereo = AudioConfigurationMode.STEREO.limelightValue
         assertEquals(2, (audioStereo shr 8) and 0xFF) // 2 channels
