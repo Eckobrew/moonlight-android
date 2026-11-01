@@ -77,37 +77,11 @@ fun HostCard(
                         .background(MidnightBlue)
                 ) {
                     Icon(
-                        imageVector = if (host.status == HostStatus.STREAMING) Icons.Default.PlayArrow else Icons.Default.Computer,
+                        imageVector = Icons.Default.Computer,
                         contentDescription = null,
                         tint = statusColor,
                         modifier = Modifier.size(30.dp)
                     )
-                }
-
-                // Status pill
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = statusColor.copy(alpha = 0.15f),
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(statusColor)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = statusText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = statusColor,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
                 }
 
                 // More options menu
@@ -181,32 +155,34 @@ fun HostCard(
                 color = TextSecondary
             )
 
-            // Current app if streaming
-            if (host.status == HostStatus.STREAMING) {
-                Spacer(modifier = Modifier.height(10.dp))
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                // Status pill
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = CyanAccent.copy(alpha = 0.12f)
+                    shape = RoundedCornerShape(12.dp),
+                    color = statusColor.copy(alpha = 0.15f),
+                    modifier = Modifier.padding(start = 8.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.VideogameAsset,
-                            contentDescription = null,
-                            tint = CyanAccent,
-                            modifier = Modifier.size(16.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Streaming Active Session",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = CyanAccent,
-                            fontWeight = FontWeight.Medium
+                            text = statusText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
+
             }
         }
     }

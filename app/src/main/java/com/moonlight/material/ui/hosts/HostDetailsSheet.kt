@@ -10,6 +10,9 @@ import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,12 +30,27 @@ fun HostDetailsSheet(
     host: Host,
     onDismiss: () -> Unit,
     onWakeOnLan: () -> Unit,
-    onSleep: () -> Unit = {}
+    onSleep: () -> Unit = {},
+    settings: com.moonlight.material.core.models.StreamSettings = com.moonlight.material.core.models.StreamSettings(),
+    onSaveRemoteAddress: (String, Int, Int) -> Unit = { _, _, _ -> },
+    onDiscoverRemoteAddress: () -> Unit = {}
 ) {
     var showSleepConfirmation by remember { mutableStateOf(false) }
     var testingPorts by remember { mutableStateOf(false) }
     var portResult by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val network = remember(context) { com.moonlight.material.networking.NetworkReachability(context) }
+    val networkState by network.reachabilityState.collectAsState()
+    DisposableEffect(network) {
+        network.startListening()
+        onDispose { network.stopListening() }
+    }
+    var editRemote by remember { mutableStateOf(false) }
+    var remoteAddress by remember(host.id, host.remoteAddress) { mutableStateOf(host.remoteAddress.orEmpty()) }
+    var remoteHttp by remember(host.id, host.remoteHTTPPort) { mutableStateOf((host.remoteHTTPPort ?: host.httpPort).toString()) }
+    var remoteHttps by remember(host.id, host.remoteHTTPSPort) { mutableStateOf((host.remoteHTTPSPort ?: host.httpsPort).toString()) }
+    val useRemoteBitrate = host.isRemoteConnection || networkState.isMetered
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -54,7 +72,34 @@ fun HostDetailsSheet(
             Spacer(modifier = Modifier.height(16.dp))
 
             DetailRow("Status", host.status.name)
-            DetailRow("Address", host.effectiveAddress)
+            DetailRow("Active Address", host.effectiveAddress)
+            DetailRow("Remote Address", host.remoteAddress ?: host.remoteAddressCandidate ?: "Not discovered yet")
+            DetailRow("Remote Access", host.remoteAddressVerification ?: if (host.remoteAddress != null) "Saved; verified on connection" else "Discover or configure below")
+            DetailRow("Connection", if (host.isRemoteConnection) "Remote" else "Primary / Local")
+            DetailRow("Network", "${networkState.connectionType.name.lowercase().replaceFirstChar { it.uppercase() }} · ${if (networkState.isMetered) "Metered" else "Unmetered"}")
+            DetailRow("Stream Bitrate", "${settings.streamBitrateKbps(useRemoteBitrate) / 1000.0} Mbps")
+            DetailRow("Bitrate Profile", if (useRemoteBitrate && settings.enableRemoteBitrate) "Remote / metered" else "Standard")
+            if (host.remoteAddress != null) {
+                DetailRow("Remote HTTP Port", (host.remoteHTTPPort ?: host.httpPort).toString())
+                DetailRow("Remote HTTPS Port", (host.remoteHTTPSPort ?: host.httpsPort).toString())
+            }
+            TextButton(onClick = onDiscoverRemoteAddress, modifier = Modifier.fillMaxWidth()) {
+                Text("Discover Remote Address")
+            }
+            TextButton(onClick = { editRemote = !editRemote }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (editRemote) "Hide Remote Address Settings" else "Configure Remote Address")
+            }
+            if (editRemote) {
+                OutlinedTextField(remoteAddress, { remoteAddress = it }, label = { Text("Remote IP or hostname") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(remoteHttp, { remoteHttp = it }, label = { Text("Remote HTTP Port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(remoteHttps, { remoteHttps = it }, label = { Text("Remote HTTPS Port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Button(
+                    onClick = { onSaveRemoteAddress(remoteAddress.trim(), remoteHttp.toInt(), remoteHttps.toInt()) },
+                    enabled = remoteAddress.isNotBlank() && remoteHttp.toIntOrNull()?.let { it in 1..65535 } == true &&
+                        remoteHttps.toIntOrNull()?.let { it in 1..65535 } == true,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Verify and Save Remote Address", textAlign = TextAlign.Center) }
+            }
             DetailRow("HTTP Port", host.effectiveHTTPPort.toString())
             DetailRow("HTTPS Port", host.effectiveHTTPSPort.toString())
             DetailRow("Server Version", host.serverVersion.ifEmpty { "Unknown" })
@@ -120,15 +165,19 @@ fun HostDetailsSheet(
                             }
                         },
                         enabled = !testingPorts,
+                        modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
                     ) {
-                        Icon(Icons.Default.NetworkCheck, null, tint = DeepNavy)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (testingPorts) "Testing…" else "Test Connectivity",
-                            color = DeepNavy,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.NetworkCheck, null, tint = DeepNavy, modifier = Modifier.align(Alignment.CenterStart))
+                            Text(
+                                text = if (testingPorts) "Testing…" else "Test Connectivity",
+                                color = DeepNavy,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp)
+                            )
+                        }
                     }
                     if (portResult != null) {
                         Spacer(modifier = Modifier.height(6.dp))
@@ -214,7 +263,9 @@ private fun DetailRow(label: String, value: String) {
             .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-        Text(text = value, style = MaterialTheme.typography.bodyMedium, color = TextPrimary, fontWeight = FontWeight.Medium)
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = TextSecondary,
+            modifier = Modifier.weight(0.4f))
+        Text(text = value, style = MaterialTheme.typography.bodyMedium, color = TextPrimary,
+            fontWeight = FontWeight.Medium, textAlign = TextAlign.End, modifier = Modifier.weight(0.6f))
     }
 }

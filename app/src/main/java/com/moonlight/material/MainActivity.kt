@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Modifier
 import com.moonlight.material.core.models.Host
 import com.moonlight.material.core.models.StreamApp
@@ -48,6 +51,17 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = DeepNavy
                 ) {
+                    val hostMessage by appState.hostActionMessage.collectAsState()
+                    if (hostMessage != null) {
+                        AlertDialog(
+                            onDismissRequest = { appState.hostActionMessage.value = null },
+                            title = { Text("Host") },
+                            text = { Text(hostMessage!!) },
+                            confirmButton = {
+                                TextButton(onClick = { appState.hostActionMessage.value = null }) { Text("OK") }
+                            }
+                        )
+                    }
                     val selectedHost by appState.selectedHost.collectAsState()
                     val isShowingSettings by appState.isShowingSettings.collectAsState()
                     val isShowingAddHost by appState.isShowingAddHost.collectAsState()
@@ -85,6 +99,11 @@ class MainActivity : ComponentActivity() {
                     if (hostDetailsToShow != null) {
                         HostDetailsSheet(
                             host = hostDetailsToShow!!,
+                            settings = currentSettings,
+                            onDiscoverRemoteAddress = { appState.discoverRemoteAddress(hostDetailsToShow!!) },
+                            onSaveRemoteAddress = { address, httpPort, httpsPort ->
+                                appState.saveRemoteAddress(hostDetailsToShow!!, address, httpPort, httpsPort)
+                            },
                             onDismiss = { appState.hostDetailsToShow.value = null },
                             onWakeOnLan = {
                                 appState.wakeHost(hostDetailsToShow!!)
@@ -103,7 +122,7 @@ class MainActivity : ComponentActivity() {
                             host = pairingHost!!,
                             pin = pairingPin,
                             stageMessage = pairingStageMessage,
-                            onCancel = { appState.pairingHost.value = null }
+                            onCancel = { appState.cancelPairing() }
                         )
                     }
 
@@ -139,6 +158,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        appState.reloadSettings()
+        appState.refreshHosts()
     }
 
     private fun launchStream(host: Host, app: StreamApp) {

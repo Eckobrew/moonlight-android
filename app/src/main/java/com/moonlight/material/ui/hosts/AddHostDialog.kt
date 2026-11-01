@@ -101,7 +101,8 @@ fun AddHostDialog(
                     val portInt = port.toIntOrNull() ?: 47989
                     onAdd(name.trim(), address.trim(), portInt)
                 },
-                enabled = address.trim().isNotEmpty(),
+                enabled = address.trim().isNotEmpty() &&
+                    (port.isBlank() || port.toIntOrNull()?.let { it in 6..65535 } == true),
                 colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
             ) {
                 Text(stringResource(R.string.add_host), color = DeepNavy, fontWeight = FontWeight.Bold)
