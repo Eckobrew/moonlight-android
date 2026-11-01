@@ -21,6 +21,7 @@ enum class ConnectionType {
 
 data class NetworkReachabilityState(
     val isConnected: Boolean = false,
+    val networkHandle: Long? = null,
     val connectionType: ConnectionType = ConnectionType.NONE,
     val isMetered: Boolean = false,
     val isLowLatencyPreferred: Boolean = false
@@ -57,10 +58,7 @@ class NetworkReachability(private val context: Context) {
     fun startListening() {
         if (isListening || connectivityManager == null) return
         try {
-            val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-            connectivityManager.registerNetworkCallback(request, networkCallback)
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
             isListening = true
             updateState()
         } catch (e: Exception) {
@@ -101,6 +99,7 @@ class NetworkReachability(private val context: Context) {
 
         return NetworkReachabilityState(
             isConnected = isConnected,
+            networkHandle = activeNetwork.networkHandle,
             connectionType = type,
             isMetered = isMetered,
             isLowLatencyPreferred = isLowLatency

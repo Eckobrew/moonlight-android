@@ -101,9 +101,6 @@ class MainActivity : ComponentActivity() {
                             host = hostDetailsToShow!!,
                             settings = currentSettings,
                             onDiscoverRemoteAddress = { appState.discoverRemoteAddress(hostDetailsToShow!!) },
-                            onSaveRemoteAddress = { address, httpPort, httpsPort ->
-                                appState.saveRemoteAddress(hostDetailsToShow!!, address, httpPort, httpsPort)
-                            },
                             onDismiss = { appState.hostDetailsToShow.value = null },
                             onWakeOnLan = {
                                 appState.wakeHost(hostDetailsToShow!!)

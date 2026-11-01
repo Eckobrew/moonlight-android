@@ -32,7 +32,6 @@ fun HostDetailsSheet(
     onWakeOnLan: () -> Unit,
     onSleep: () -> Unit = {},
     settings: com.moonlight.material.core.models.StreamSettings = com.moonlight.material.core.models.StreamSettings(),
-    onSaveRemoteAddress: (String, Int, Int) -> Unit = { _, _, _ -> },
     onDiscoverRemoteAddress: () -> Unit = {}
 ) {
     var showSleepConfirmation by remember { mutableStateOf(false) }
@@ -46,10 +45,6 @@ fun HostDetailsSheet(
         network.startListening()
         onDispose { network.stopListening() }
     }
-    var editRemote by remember { mutableStateOf(false) }
-    var remoteAddress by remember(host.id, host.remoteAddress) { mutableStateOf(host.remoteAddress.orEmpty()) }
-    var remoteHttp by remember(host.id, host.remoteHTTPPort) { mutableStateOf((host.remoteHTTPPort ?: host.httpPort).toString()) }
-    var remoteHttps by remember(host.id, host.remoteHTTPSPort) { mutableStateOf((host.remoteHTTPSPort ?: host.httpsPort).toString()) }
     val useRemoteBitrate = host.isRemoteConnection || networkState.isMetered
 
     ModalBottomSheet(
@@ -85,20 +80,6 @@ fun HostDetailsSheet(
             }
             TextButton(onClick = onDiscoverRemoteAddress, modifier = Modifier.fillMaxWidth()) {
                 Text("Discover Remote Address")
-            }
-            TextButton(onClick = { editRemote = !editRemote }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (editRemote) "Hide Remote Address Settings" else "Configure Remote Address")
-            }
-            if (editRemote) {
-                OutlinedTextField(remoteAddress, { remoteAddress = it }, label = { Text("Remote IP or hostname") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(remoteHttp, { remoteHttp = it }, label = { Text("Remote HTTP Port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(remoteHttps, { remoteHttps = it }, label = { Text("Remote HTTPS Port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Button(
-                    onClick = { onSaveRemoteAddress(remoteAddress.trim(), remoteHttp.toInt(), remoteHttps.toInt()) },
-                    enabled = remoteAddress.isNotBlank() && remoteHttp.toIntOrNull()?.let { it in 1..65535 } == true &&
-                        remoteHttps.toIntOrNull()?.let { it in 1..65535 } == true,
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Verify and Save Remote Address", textAlign = TextAlign.Center) }
             }
             DetailRow("HTTP Port", host.effectiveHTTPPort.toString())
             DetailRow("HTTPS Port", host.effectiveHTTPSPort.toString())

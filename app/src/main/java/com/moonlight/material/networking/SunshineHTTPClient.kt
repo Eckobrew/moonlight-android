@@ -146,14 +146,25 @@ class SunshineHTTPClient(
         return updated to metadata
     }
 
-    suspend fun verifyRemoteAddress(host: Host, address: String, httpPort: Int, httpsPort: Int): Host {
+    private suspend fun verifyRemoteAddress(host: Host, address: String, httpPort: Int, httpsPort: Int): Host {
         if (!host.isSecurelyPaired || host.serverId.isNullOrBlank()) {
             throw HostTrustException("Pair with the host locally before saving a remote address.")
         }
         require(httpPort in 1..65535 && httpsPort in 1..65535) { "Ports must be between 1 and 65535" }
         val candidate = host.copy(remoteAddress = address.trim(), remoteHTTPPort = httpPort,
             remoteHTTPSPort = httpsPort, activeAddress = address.trim())
-        fetchServerInfoAtAddress(candidate) // Verifies pinned certificate AND server identity.
+        fetchServerInfoAtAddress(candidate) // Authenticate WAN HTTPS through the router, including hairpin access.
+        // Also verify the corresponding HTTP mapping only after pinned HTTPS authenticates the PC.
+        val httpUrl = "http://${candidate.urlAddress}:${candidate.effectiveHTTPPort}/serverinfo?uniqueid=${uniqueID()}"
+        baseHttpClient.newBuilder().connectTimeout(2, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS)
+            .build().newCall(Request.Builder().url(httpUrl).build()).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("Remote HTTP listener returned ${response.code}")
+                val values = parseSimpleXml(response.body?.string().orEmpty())
+                checkProtocolResponse(values)
+                if (!host.serverId.equals(values["uniqueid"], ignoreCase = true)) {
+                    throw HostTrustException("Remote HTTP listener belongs to a different host.")
+                }
+            }
         return candidate.copy(activeAddress = host.activeAddress, remoteAddressCandidate = address.trim(),
             remoteAddressVerification = "Verified: certificate and server ID match.")
     }

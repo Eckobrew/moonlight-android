@@ -32,6 +32,8 @@ class AppState(context: Context) : ViewModel() {
     val boxArtManager = com.moonlight.material.core.utils.BoxArtManager(context, httpClient)
     val pairingService = PairingService(httpClient, certificateManager)
     private val discoveryService = BonjourDiscoveryService(context)
+    private val networkReachability = com.moonlight.material.networking.NetworkReachability(context)
+    private var pendingRemoteDiscovery = false
 
     val sessionController = StreamSessionController(httpClient)
 
@@ -79,7 +81,18 @@ class AppState(context: Context) : ViewModel() {
             }
         }
 
-        refreshHosts()
+        networkReachability.startListening()
+        viewModelScope.launch {
+            var first = true
+            var lastNetwork: Long? = null
+            networkReachability.reachabilityState.collect { network ->
+                if (first || (network.isConnected && network.networkHandle != lastNetwork)) {
+                    first = false
+                    lastNetwork = network.networkHandle
+                    refreshHosts(forceRemoteVerification = network.isConnected)
+                }
+            }
+        }
     }
 
     fun reloadSettings() { _settings.value = settingsStore.loadSettings() }
@@ -89,14 +102,17 @@ class AppState(context: Context) : ViewModel() {
         settingsStore.saveSettings(newSettings)
     }
 
-    fun refreshHosts() {
-        if (_isRefreshingHosts.value) return
+    fun refreshHosts(forceRemoteVerification: Boolean = false) {
+        if (_isRefreshingHosts.value) {
+            if (forceRemoteVerification) pendingRemoteDiscovery = true
+            return
+        }
         _isRefreshingHosts.value = true
         viewModelScope.launch {
             try {
                 for (host in _hosts.value.toList()) {
                     val refreshed = try {
-                        httpClient.fetchServerInfo(host, discoverRemote = true).first
+                        httpClient.fetchServerInfo(host, discoverRemote = true, forceRemoteVerification = forceRemoteVerification).first
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -109,6 +125,10 @@ class AppState(context: Context) : ViewModel() {
                 }
             } finally {
                 _isRefreshingHosts.value = false
+                if (pendingRemoteDiscovery) {
+                    pendingRemoteDiscovery = false
+                    refreshHosts(forceRemoteVerification = true)
+                }
             }
         }
     }
@@ -162,7 +182,12 @@ class AppState(context: Context) : ViewModel() {
                 host.copy(
                     id = existing.id,
                     isPaired = existing.isPaired,
-                    serverCertificateDER = existing.serverCertificateDER
+                    serverCertificateDER = existing.serverCertificateDER,
+                    remoteAddress = existing.remoteAddress ?: host.remoteAddress,
+                    remoteHTTPPort = existing.remoteHTTPPort ?: host.remoteHTTPPort,
+                    remoteHTTPSPort = existing.remoteHTTPSPort ?: host.remoteHTTPSPort,
+                    remoteAddressCandidate = existing.remoteAddressCandidate ?: host.remoteAddressCandidate,
+                    remoteAddressVerification = existing.remoteAddressVerification ?: host.remoteAddressVerification
                 )
             } else host
         } else {
@@ -185,22 +210,6 @@ class AppState(context: Context) : ViewModel() {
                 if (_hosts.value.any { it.id == host.id }) addOrUpdateHost(updated)
             } catch (e: Exception) {
                 hostActionMessage.value = "Remote address discovery failed: ${e.message}"
-            }
-        }
-    }
-
-    fun saveRemoteAddress(host: Host, address: String, httpPort: Int, httpsPort: Int) {
-        viewModelScope.launch {
-            try {
-                val verified = httpClient.verifyRemoteAddress(host, address, httpPort, httpsPort)
-                val latest = _hosts.value.find { it.id == host.id } ?: return@launch
-                addOrUpdateHost(latest.copy(remoteAddress = verified.remoteAddress,
-                    remoteHTTPPort = verified.remoteHTTPPort, remoteHTTPSPort = verified.remoteHTTPSPort,
-                    remoteAddressCandidate = verified.remoteAddressCandidate,
-                    remoteAddressVerification = verified.remoteAddressVerification))
-                hostActionMessage.value = "Remote address verified and saved."
-            } catch (e: Exception) {
-                hostActionMessage.value = "Could not verify remote address: ${e.message}"
             }
         }
     }
@@ -294,6 +303,7 @@ class AppState(context: Context) : ViewModel() {
                     }
                 )
                 addOrUpdateHost(pairedHost)
+                refreshHosts(forceRemoteVerification = true)
                 pairingHost.value = null
                 pairingPin.value = null
                 hostActionMessage.value = "Successfully paired with ${pairedHost.name}!"
@@ -352,6 +362,7 @@ class AppState(context: Context) : ViewModel() {
 
     override fun onCleared() {
         discoveryService.stopDiscovery()
+        networkReachability.stopListening()
         super.onCleared()
     }
 
