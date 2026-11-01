@@ -10,15 +10,21 @@ enum class VideoCodec(val displayName: String) {
     AV1("AV1");
 
     fun limelightMask(enableHdr: Boolean = false, yuv444: Boolean = false): Int {
-        val hevcMask = if (enableHdr) (0x0002 or 0x0004) else 0x0002
-        val av1Mask = if (enableHdr) (0x0008 or 0x0010) else 0x0008
+        val hevcMask = 0x0100 or (if (enableHdr) 0x0200 else 0)
+        val av1Mask = 0x1000 or (if (enableHdr) 0x2000 else 0)
         val baseMask = when (this) {
             AUTO -> 0x0001 or hevcMask or av1Mask
             H264 -> 0x0001
             HEVC -> hevcMask
             AV1 -> av1Mask
         }
-        return if (yuv444 && this != AV1) baseMask or 0x0100 else baseMask
+        val chromaMask = when (this) {
+            AUTO -> 0x0004 or 0x0400 or 0x4000 or (if (enableHdr) 0x0800 or 0x8000 else 0)
+            H264 -> 0x0004
+            HEVC -> 0x0400 or (if (enableHdr) 0x0800 else 0)
+            AV1 -> 0x4000 or (if (enableHdr) 0x8000 else 0)
+        }
+        return baseMask or (if (yuv444) chromaMask else 0)
     }
 }
 
@@ -82,6 +88,14 @@ data class StreamSettings(
     val features: ClientFeatures = ClientFeatures(),
     val controllerMask: Short = 0
 ) {
+    val isNativeResolution: Boolean get() = width == 0 && height == 0
+
+    fun resolveNativeResolution(displayWidth: Int, displayHeight: Int): StreamSettings {
+        if (!isNativeResolution) return this
+        return copy(width = maxOf(displayWidth, displayHeight) / 2 * 2,
+            height = minOf(displayWidth, displayHeight) / 2 * 2)
+    }
+
     fun streamBitrateKbps(isRemote: Boolean): Int {
         val normal = bitrateMbps * 1000
         if (!isRemote || !enableRemoteBitrate) return normal
@@ -90,7 +104,7 @@ data class StreamSettings(
 
     val validationMessage: String?
         get() {
-            if (width != 0 && height != 0 && (width !in 256..8192 || height !in 256..8192 || width % 2 != 0 || height % 2 != 0)) {
+            if (!isNativeResolution && (width !in 256..8192 || height !in 256..8192 || width % 2 != 0 || height % 2 != 0)) {
                 return "Resolution must use even dimensions between 256 and 8192, or Native."
             }
             if (fps !in 1..500) return "Frame rate must be between 1 and 500 FPS."
