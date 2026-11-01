@@ -33,6 +33,9 @@ class StreamActivity : ComponentActivity() {
         // Keep screen on during streaming
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+
         // Immersive fullscreen mode
         val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
         windowInsetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -45,11 +48,17 @@ class StreamActivity : ComponentActivity() {
         val json = Json { ignoreUnknownKeys = true }
         val host = json.decodeFromString<Host>(hostJson)
         val app = json.decodeFromString<StreamApp>(appJson)
-        val settings = json.decodeFromString<StreamSettings>(settingsJson)
+        val requestedSettings = json.decodeFromString<StreamSettings>(settingsJson)
+        val displaySize = android.graphics.Point()
+        @Suppress("DEPRECATION")
+        windowManager.defaultDisplay.getRealSize(displaySize)
+        val settings = requestedSettings.resolveNativeResolution(displaySize.x, displaySize.y)
 
         val certManager = CertificateManager.getInstance()
         val httpClient = SunshineHTTPClient(certManager)
-        sessionController = StreamSessionController(httpClient)
+        sessionController = StreamSessionController(httpClient) {
+            com.moonlight.material.networking.NetworkReachability(this).getCurrentState().isMetered
+        }
 
         setContent {
             MoonlightTheme {
@@ -58,6 +67,16 @@ class StreamActivity : ComponentActivity() {
                     app = app,
                     settings = settings,
                     session = sessionController,
+                    onTouchModeChanged = { touchpad ->
+                        val store = com.moonlight.material.core.state.AppSettingsStore(applicationContext)
+                        val saved = store.loadSettings()
+                        store.saveSettings(saved.copy(features = saved.features.copy(desktopMouse = touchpad)))
+                    },
+                    onControllerVisibilityChanged = { enabled ->
+                        val store = com.moonlight.material.core.state.AppSettingsStore(applicationContext)
+                        val saved = store.loadSettings()
+                        store.saveSettings(saved.copy(features = saved.features.copy(touchOverlayEnabled = enabled)))
+                    },
                     onFinish = {
                         sessionController.stopSession()
                         finish()
@@ -83,15 +102,8 @@ class StreamActivity : ComponentActivity() {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE) {
             return super.onKeyDown(keyCode, event)
         }
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            if (::sessionController.isInitialized && sessionController.isStreaming.value) {
-                if (sessionController.showSessionControls.value) {
-                    sessionController.closeSessionControls()
-                } else {
-                    sessionController.openSessionControls()
-                }
-                return true
-            }
+        if (keyCode == KeyEvent.KEYCODE_BACK ||
+            (::sessionController.isInitialized && sessionController.localInputActive)) {
             return super.onKeyDown(keyCode, event)
         }
         if (::sessionController.isInitialized && sessionController.isStreaming.value) {
@@ -109,8 +121,9 @@ class StreamActivity : ComponentActivity() {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE) {
             return super.onKeyUp(keyCode, event)
         }
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            return true
+        if (keyCode == KeyEvent.KEYCODE_BACK ||
+            (::sessionController.isInitialized && sessionController.localInputActive)) {
+            return super.onKeyUp(keyCode, event)
         }
         if (::sessionController.isInitialized && sessionController.isStreaming.value) {
             if (sessionController.gamepadHandler.handleKeyEvent(event)) {

@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.moonlight.material.core.models.StreamApp
 import com.moonlight.material.core.state.StreamSessionController
@@ -26,9 +27,12 @@ fun SessionControlsSheet(
     session: StreamSessionController,
     app: StreamApp,
     onShowKeyboard: () -> Unit,
+    onTouchModeChanged: (Boolean) -> Unit,
     onFinish: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val touchpadMode by session.touchpadMode.collectAsState()
+    val isQuitting by session.isQuittingApp.collectAsState()
     val currentKbps by session.runtimeBitrateKbps.collectAsState()
     var bitrateMbps by remember { mutableStateOf((currentKbps / 1000.0).coerceAtLeast(1.0)) }
     val isApplyingBitrate by session.bitrateRequestInProgress.collectAsState()
@@ -42,6 +46,7 @@ fun SessionControlsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MidnightBlue,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
@@ -77,6 +82,16 @@ fun SessionControlsSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Feedback Message
+            if (!hostControlMessage.isNullOrEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = hostControlMessage ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CyanGlow
+                )
+            }
+
             // Quick Action: Show Keyboard
             OutlinedButton(
                 onClick = {
@@ -97,6 +112,19 @@ fun SessionControlsSheet(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            Text("Touch Input Mode", color = TextPrimary, fontWeight = FontWeight.Medium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !touchpadMode, onClick = {
+                    session.setTouchpadMode(false)
+                    onTouchModeChanged(false)
+                }, label = { Text("Touchscreen") })
+                FilterChip(selected = touchpadMode, onClick = {
+                    session.setTouchpadMode(true)
+                    onTouchModeChanged(true)
+                }, label = { Text("Touchpad") })
+            }
+            Spacer(Modifier.height(12.dp))
 
             // Set Bitrate Section
             Surface(
@@ -263,18 +291,9 @@ fun SessionControlsSheet(
                 }
             }
 
-            // Feedback Message
-            if (!hostControlMessage.isNullOrEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = hostControlMessage ?: "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = CyanGlow
-                )
-            }
-
             Spacer(modifier = Modifier.height(20.dp))
 
+            Spacer(Modifier.height(20.dp))
             // Disconnect button
             Button(
                 onClick = {
@@ -286,11 +305,12 @@ fun SessionControlsSheet(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Default.Close, null, tint = TextPrimary)
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(horizontalAlignment = Alignment.Start) {
-                    Text("Disconnect Stream", color = TextPrimary, fontWeight = FontWeight.Bold)
-                    Text("Leave game running on host to resume later", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Close, null, tint = TextPrimary, modifier = Modifier.align(Alignment.CenterStart))
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Disconnect Stream", color = TextPrimary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Text("Leave game running on host to resume later", style = MaterialTheme.typography.bodySmall, color = TextSecondary, textAlign = TextAlign.Center)
+                    }
                 }
             }
 
@@ -299,17 +319,20 @@ fun SessionControlsSheet(
             // Quit Game button
             Button(
                 onClick = { showQuitConfirmDialog = true },
+                enabled = !isQuitting,
                 colors = ButtonDefaults.buttonColors(containerColor = RoseError.copy(alpha = 0.9f)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Default.PowerSettingsNew, null, tint = TextPrimary)
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(horizontalAlignment = Alignment.Start) {
-                    Text("Quit Game", color = TextPrimary, fontWeight = FontWeight.Bold)
-                    Text("Terminate app on host PC", style = MaterialTheme.typography.bodySmall, color = TextPrimary.copy(alpha = 0.85f))
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.PowerSettingsNew, null, tint = TextPrimary, modifier = Modifier.align(Alignment.CenterStart))
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (isQuitting) "Quitting…" else "Quit Game", color = TextPrimary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Text("Terminate app on host PC", style = MaterialTheme.typography.bodySmall, color = TextPrimary.copy(alpha = 0.85f), textAlign = TextAlign.Center)
+                    }
                 }
             }
+
 
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -336,9 +359,7 @@ fun SessionControlsSheet(
                 Button(
                     onClick = {
                         showQuitConfirmDialog = false
-                        onDismiss()
                         session.quitRunningApp()
-                        onFinish()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoseError)
                 ) {

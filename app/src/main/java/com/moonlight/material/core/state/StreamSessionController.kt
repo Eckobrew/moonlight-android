@@ -36,7 +36,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class StreamSessionController(
-    private val httpClient: SunshineHTTPClient
+    private val httpClient: SunshineHTTPClient,
+    private val isMeteredNetwork: () -> Boolean = { false }
 ) : MoonBridge.ConnectionListener,
     VideoDecoderListener,
     GamepadListener,
@@ -150,8 +151,19 @@ class StreamSessionController(
         }
     }
 
+    private val _touchpadMode = MutableStateFlow(false)
+    val touchpadMode: StateFlow<Boolean> = _touchpadMode.asStateFlow()
+
+    fun setTouchpadMode(enabled: Boolean) {
+        touchMouseHandler.reset()
+        touchMouseHandler.isDesktopMouseMode = enabled
+        _touchpadMode.value = enabled
+    }
+
+    var localInputActive: Boolean = false
+
     fun openSessionControls() {
-        if (_isStreaming.value && _currentStageName.value == "Connected") {
+        if (_isStreaming.value) {
             _showSessionControls.value = true
         }
     }
@@ -280,7 +292,7 @@ class StreamSessionController(
                 currentSettings = settings
                 gamepadHandler.swapFaceButtons = settings.features.swapFaceButtons
                 gamepadHandler.gamepadMouseEnabled = settings.features.gamepadMouse
-                touchMouseHandler.isDesktopMouseMode = settings.features.desktopMouse
+                setTouchpadMode(settings.features.desktopMouse)
                 touchMouseHandler.mouseSensitivityX = settings.mouseSensitivityX * settings.mouseSensitivity
                 touchMouseHandler.mouseSensitivityY = settings.mouseSensitivityY * settings.mouseSensitivity
                 touchMouseHandler.mouseSubPixelAccumulation = settings.mouseSubPixelAccumulation
@@ -362,7 +374,7 @@ class StreamSessionController(
         rikeyId: Int,
         generation: Long
     ) {
-        val chosenBitrateKbps = settings.streamBitrateKbps(isRemote = false)
+        val chosenBitrateKbps = settings.streamBitrateKbps(isRemote = host.isRemoteConnection || isMeteredNetwork())
         _runtimeBitrateKbps.value = chosenBitrateKbps
 
         val riAesKey = rikey
@@ -388,7 +400,7 @@ class StreamSessionController(
                     fps = settings.fps,
                     bitrate = chosenBitrateKbps,
                     packetSize = settings.packetSize,
-                    streamingRemotely = 0, // STREAM_CFG_AUTO
+                    streamingRemotely = if (host.isRemoteConnection) 1 else 2, // REMOTE or AUTO
                     audioConfiguration = settings.audioMode.limelightValue,
                     supportedVideoFormats = videoFormatMask,
                     clientRefreshRateX100 = 6000,
@@ -459,6 +471,7 @@ class StreamSessionController(
     }
 
     fun stopSession(forceQuitApp: Boolean? = null) {
+        touchMouseHandler.reset()
         sessionGeneration++
         val hostToQuit = activeHost
         val shouldQuit = forceQuitApp ?: shouldQuitHostAppOnStop
@@ -514,13 +527,35 @@ class StreamSessionController(
         stopSession(forceQuitApp = false)
     }
 
+    private val _isQuittingApp = MutableStateFlow(false)
+    val isQuittingApp: StateFlow<Boolean> = _isQuittingApp.asStateFlow()
+
     fun quitRunningApp() {
-        stopSession(forceQuitApp = true)
+        if (_isQuittingApp.value) return
+        val host = activeHost ?: return
+        _isQuittingApp.value = true
+        _hostControlMessage.value = null
+        scope.launch {
+            try {
+                if (httpClient.quitApp(host)) {
+                    _sessionError.value = null
+                    stopSession(forceQuitApp = false)
+                } else {
+                    _hostControlMessage.value = "Sunshine did not confirm quitting the game. Check the host and try again."
+                }
+            } catch (e: Exception) {
+                _hostControlMessage.value = "Could not quit the game: ${e.message}"
+            } finally {
+                _isQuittingApp.value = false
+            }
+        }
     }
 
     fun sendUtf8Text(text: String) {
         try {
-            MoonBridge.sendUtf8Text(text)
+            if (!_isStreaming.value || text.isEmpty()) return
+            val result = MoonBridge.sendUtf8Text(text)
+            if (result != 0) AppLogger.warn("Remote text input could not be queued ($result)", TAG)
         } catch (t: Throwable) {
             AppLogger.error("Failed to send UTF-8 text: ${t.message}", TAG)
         }
@@ -835,6 +870,20 @@ class StreamSessionController(
     }
 
     // --- MouseEventListener ---
+
+    override fun onNativeTouch(eventType: Byte, pointerId: Int, x: Float, y: Float, pressure: Float, major: Float, minor: Float): Int {
+        if (!_isStreaming.value || _currentStageName.value != "Connected") return 0
+        return try {
+            val result = MoonBridge.sendTouchEvent(eventType, pointerId, x, y, pressure, major, minor, (-1).toShort())
+            if (eventType.toInt() == 1) {
+                AppLogger.debug("Native touch down: result=$result, hostFeatures=${MoonBridge.getHostFeatureFlags()}", "INPUT")
+            }
+            result
+        } catch (t: Throwable) {
+            AppLogger.warn("Native touch unavailable: ${t.message}", TAG)
+            -5501
+        }
+    }
 
     override fun onMouseMoveRelative(deltaX: Short, deltaY: Short) {
         if (!_isStreaming.value) return

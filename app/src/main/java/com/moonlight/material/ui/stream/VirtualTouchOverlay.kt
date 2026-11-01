@@ -56,6 +56,12 @@ fun VirtualTouchOverlay(
         )
     }
 
+    DisposableEffect(listener) {
+        onDispose {
+            listener.onControllerStateChanged(0, 0, 0, 0, 0, 0, 0, 0)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
