@@ -190,6 +190,10 @@ class StreamSessionController(
         _connectionWarning.value = if (status == 1) "Network quality is poor. Try lowering the bitrate." else null
     }
 
+    fun updateAppFocus(focused: Boolean) {
+        audioEngine?.updateFocus(focused)
+    }
+
     fun startSession(
         host: Host,
         app: StreamApp,
@@ -275,7 +279,7 @@ class StreamSessionController(
                     enablePacing = false,
                     listener = this@StreamSessionController
                 )
-                audioEngine = AudioPlaybackEngine()
+                audioEngine = AudioPlaybackEngine(muteOnFocusLoss = settings.muteAudioOnFocusLoss)
 
                 // Register native bridge callbacks
                 MoonBridge.connectionListener = this@StreamSessionController
@@ -619,7 +623,7 @@ class StreamSessionController(
         }
 
         override fun onStart() {
-            // Audio started
+            audioEngine?.start()
         }
 
         override fun onStop() {

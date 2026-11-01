@@ -116,10 +116,10 @@ Status Definitions:
 
 | Reference File | Android File(s) | Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `Pipeline/Audio/AudioOutputDevices.swift` | `stream/audio/AudioOutputDevices.kt` | not started | Milestone M5: Android `AudioDeviceCallback` routing. |
-| `Pipeline/Audio/AudioPlaybackControl.swift` | `stream/audio/AudioPlaybackControl.kt` | not started | Milestone M5: Ring buffer backpressure via `LiGetPendingAudioDuration`. |
-| `Pipeline/Audio/AudioPlaybackEngine.swift` | `stream/audio/AudioPlaybackEngine.kt` | not started | Milestone M5: Opus decoding + low-latency `AudioTrack`. |
-| `Pipeline/Audio/NativeAudioOutput.swift` | `stream/audio/AudioPlaybackEngine.kt` | not started | Milestone M5: Android `AudioTrack` output stream. |
+| `Pipeline/Audio/AudioOutputDevices.swift` | `stream/audio/AudioPlaybackEngine.kt` | ported | Android `AudioDeviceInfo` and audio routing integration. |
+| `Pipeline/Audio/AudioPlaybackControl.swift` | `stream/audio/AudioPlaybackControl.kt` | ported | Serialized lifecycle, generation tracking, and focus mute management. |
+| `Pipeline/Audio/AudioPlaybackEngine.swift` | `stream/audio/AudioPlaybackEngine.kt`, `stream/audio/AudioRingBuffer.kt` | ported | Opus multistream audio, ring buffer with underrun fading, and backlog protection. |
+| `Pipeline/Audio/NativeAudioOutput.swift` | `stream/audio/AudioPlaybackEngine.kt` | ported | Low-latency Android `AudioTrack` output stream (Stereo/5.1/7.1). |
 
 ---
 

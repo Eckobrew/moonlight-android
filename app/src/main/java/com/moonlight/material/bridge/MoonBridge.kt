@@ -84,6 +84,14 @@ object MoonBridge {
     const val VIDEO_FORMAT_MASK_10BIT = 0xAA00
     const val VIDEO_FORMAT_MASK_YUV444 = 0xCC04
 
+    // Audio configurations
+    const val AUDIO_CONFIGURATION_STEREO = (0x3 shl 16) or (2 shl 8) or 0xCA
+    const val AUDIO_CONFIGURATION_51_SURROUND = (0x3F shl 16) or (6 shl 8) or 0xCA
+    const val AUDIO_CONFIGURATION_71_SURROUND = (0x63F shl 16) or (8 shl 8) or 0xCA
+
+    fun channelCountFromAudioConfiguration(config: Int): Int = (config shr 8) and 0xFF
+    fun channelMaskFromAudioConfiguration(config: Int): Int = (config shr 16) and 0xFFFF
+
     init {
         try {
             System.loadLibrary("moonlight-bridge")
