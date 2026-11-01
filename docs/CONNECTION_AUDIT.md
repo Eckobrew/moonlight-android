@@ -43,3 +43,9 @@ Audited 1 November 2026 against the reported intermittent connection, disappeari
 - Android application ID is `com.eckobrew.moonlight_android` because package identifiers cannot contain a hyphen. Launcher assets come from [official Moonlight Android](https://github.com/moonlight-stream/moonlight-android/tree/master/app/src/main/res).
 - HUD FPS now separates received pictures, decoder output, and actual MediaCodec frame-rendered callbacks. Decode-plus-queue time uses matched monotonic submission/output timestamps. Rolling one-second samples refresh every 250ms and expire on stalls. The bitrate label explicitly says Target; unknown packet loss is no longer displayed as zero.
 - Validation: a full pre-HUD unit run passed 106 tests; the three new clock-driven HUD tests pass separately. The final debug APK builds. Further interactive device tests were stopped at the user's request.
+
+## Latest interface and automatic-remote refinements
+
+The stream menu now opens through Android Back only; floating top buttons are removed. The HUD keeps rendered FPS, decode timing, RTT and resolution/codec without received/decoded rates or target figures. Quick actions use the previous keyboard button style without spacer gaps. Closing the Android IME also clears local keyboard input mode.
+
+Remote configuration is automatic only. Default-network changes and successful pairing trigger discovery. A candidate must pass pinned WAN HTTPS/server-ID checks plus the corresponding HTTP server-ID check before being saved; LAN verification therefore exercises router hairpin access. Unverified candidates stay distinct from usable routes. Saved remote address/port metadata survives rediscovery merges and is persisted in saved_hosts. Manual remote address configuration has been removed.
