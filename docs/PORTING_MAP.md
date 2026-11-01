@@ -131,11 +131,11 @@ Status Definitions:
 | `Pipeline/Metal/MetalStreamRenderer.swift` | `stream/video/MediaCodecDecoder.kt` | N/A on Android | Metal pipeline; Android hardware decodes directly to Surface. |
 | `Pipeline/Metal/ShaderResources.swift` | N/A on Android | N/A on Android | Apple Metal shaders; replaced with Android native Surface composition. |
 | `Pipeline/Metal/Shaders.metal` | N/A on Android | N/A on Android | Metal Shading Language source; N/A on Android. |
-| `Pipeline/Video/AV1OBUParser.swift` | `stream/video/AV1OBUParser.kt` | not started | Milestone M4: AV1 sequence header parsing for MediaCodec csd-0. |
-| `Pipeline/Video/FramePacer.swift` | `stream/video/FramePacer.kt` | not started | Milestone M4: Presentation pacing via `releaseOutputBuffer(idx, timeNs)`. |
-| `Pipeline/Video/NativeStreamPresenter.swift`| `stream/video/MediaCodecDecoder.kt` | N/A on Android | macOS AVSampleBufferDisplayLayer; mapped to Android SurfaceView. |
-| `Pipeline/Video/StreamHDRState.swift` | `stream/video/StreamHDRState.kt` | not started | Milestone M4: HDR10 metadata passing to MediaCodec and Display. |
-| `Pipeline/Video/VideoToolboxDecoder.swift` | `stream/video/MediaCodecDecoder.kt` | not started | Milestone M4: Hardware MediaCodec decoder with low-latency flags. |
+| `Pipeline/Video/AV1OBUParser.swift` | `stream/video/AV1OBUParser.kt` | ported | AV1 sequence header parsing for MediaCodec CSD/OBUs and av1C records. |
+| `Pipeline/Video/FramePacer.swift` | `stream/video/FramePacer.kt` | ported | Presentation pacing via refresh rate alignment and `releaseOutputBuffer(idx, timeNs)`. |
+| `Pipeline/Video/NativeStreamPresenter.swift`| `stream/video/MediaCodecDecoder.kt` | N/A on Android | macOS AVSampleBufferDisplayLayer; mapped to Android SurfaceView zero-copy rendering. |
+| `Pipeline/Video/StreamHDRState.swift` | `stream/video/StreamHDRState.kt` | ported | HDR10 CTA-861.3 static metadata InfoFrame and ST2084/BT2020 format keys. |
+| `Pipeline/Video/VideoToolboxDecoder.swift` | `stream/video/MediaCodecDecoder.kt` | ported | Hardware MediaCodec decoder (AVC/HEVC/AV1) with low-latency flags, CSD, and pacing. |
 
 ---
 

@@ -269,11 +269,10 @@ class StreamSessionController(
                 // Create hardware video decoder and audio playback engine
                 videoDecoder = MediaCodecDecoder(
                     surface = surface,
-                    width = settings.width,
-                    height = settings.height,
-                    fps = settings.fps,
-                    codec = settings.codec,
-                    enableHdr = settings.enableHdr,
+                    streamWidth = settings.width,
+                    streamHeight = settings.height,
+                    streamFps = settings.fps,
+                    enablePacing = false,
                     listener = this@StreamSessionController
                 )
                 audioEngine = AudioPlaybackEngine()
@@ -545,7 +544,7 @@ class StreamSessionController(
     }
 
     override fun onSetHdrMode(enabled: Boolean, hdrMetadata: ByteArray?) {
-        // Handled in M4
+        videoDecoder?.setHdrMode(enabled, hdrMetadata)
     }
 
     override fun onRumble(controllerNumber: Short, lowFreqMotor: Short, highFreqMotor: Short) {

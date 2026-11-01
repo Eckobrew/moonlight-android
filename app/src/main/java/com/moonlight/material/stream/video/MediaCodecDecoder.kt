@@ -3,128 +3,222 @@ package com.moonlight.material.stream.video
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
+import android.os.SystemClock
 import android.view.Surface
-import com.moonlight.material.core.models.VideoCodec
+import com.moonlight.material.bridge.MoonBridge
 import com.moonlight.material.core.utils.AppLogger
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicBoolean
 
 interface VideoDecoderListener {
     fun onFrameDecoded(decodeTimeMs: Double)
     fun onFrameDropped()
     fun onDecoderError(error: String)
+    fun onFormatChanged(width: Int, height: Int) {}
 }
 
+/**
+ * High-performance hardware video decoder using Android MediaCodec.
+ *
+ * Implements low-latency streaming pipeline for H.264, HEVC, and AV1 video streams.
+ * Handles parameter sets (CSD) for H.264/HEVC and Sequence Header OBUs for AV1.
+ * Decouples input submission from output rendering using a dedicated renderer thread,
+ * and paces frame presentation via [FramePacer] and [StreamHDRState].
+ */
 class MediaCodecDecoder(
-    private val surface: Surface,
-    private val width: Int,
-    private val height: Int,
-    private val fps: Int,
-    private val codec: VideoCodec,
-    private val enableHdr: Boolean = false,
+    private var surface: Surface,
+    private var streamWidth: Int,
+    private var streamHeight: Int,
+    private var streamFps: Int,
+    private val enablePacing: Boolean = false,
     private val listener: VideoDecoderListener? = null
 ) {
-    private val TAG = "DECODER"
-    private var mediaCodec: MediaCodec? = null
-    private var isRunning = false
+    private val TAG = "MediaCodecDecoder"
 
-    private var frameCount = 0
-    private var lastFpsTimestamp = System.currentTimeMillis()
+    private var videoDecoder: MediaCodec? = null
+    private var rendererThread: Thread? = null
+    private val isStopping = AtomicBoolean(false)
+    private val isRunning = AtomicBoolean(false)
+
+    private val pacer = FramePacer(enabled = enablePacing, refreshRate = streamFps.toDouble())
+    private val hdrState = StreamHDRState()
+
+    private var videoFormat: Int = MoonBridge.VIDEO_FORMAT_H264
+    private var mimeType: String = MediaFormat.MIMETYPE_VIDEO_AVC
+    private var configuredFormat: MediaFormat? = null
+
+    // Parameter sets storage
+    private val spsBuffers = mutableListOf<ByteArray>()
+    private val ppsBuffers = mutableListOf<ByteArray>()
+    private val vpsBuffers = mutableListOf<ByteArray>()
+    private var av1SequenceHeader: ByteArray? = null
+    private var submittedCsd = false
+
+    // Timing and metrics
+    private var baseTimestampUs: Long = 0L
+    private var lastTimestampUs: Long = 0L
+    private var lastFrameNumber: Int = 0
+
+    var totalFramesReceived: Long = 0
+        private set
+    var totalFramesRendered: Long = 0
+        private set
+    var totalFramesDropped: Long = 0
+        private set
     var currentFps: Double = 0.0
         private set
+    var averageDecodeTimeMs: Double = 0.0
+        private set
 
-    fun start() {
-        val mimeType = when (codec) {
-            VideoCodec.H264 -> MediaFormat.MIMETYPE_VIDEO_AVC
-            VideoCodec.HEVC -> MediaFormat.MIMETYPE_VIDEO_HEVC
-            VideoCodec.AV1 -> "video/av01"
-            VideoCodec.AUTO -> MediaFormat.MIMETYPE_VIDEO_HEVC
-        }
+    private var fpsFrameCount: Int = 0
+    private var lastFpsTimestampMs: Long = 0L
+    private var totalDecodeTimeMs: Double = 0.0
+    private var decodeTimeCount: Long = 0
 
-        try {
-            val format = MediaFormat.createVideoFormat(mimeType, width, height).apply {
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, width * height * 3 / 2)
-                setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                }
-                setInteger(MediaFormat.KEY_PRIORITY, 0) // Real-time priority
-                if (enableHdr) {
-                    setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT2020)
-                    setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_ST2084)
-                }
+    private val decoderLock = Any()
+
+    fun setup(videoFormat: Int, width: Int, height: Int, redrawRate: Int): Int {
+        synchronized(decoderLock) {
+            this.videoFormat = videoFormat
+            this.streamWidth = width
+            this.streamHeight = height
+            this.streamFps = redrawRate
+            pacer.configure(enablePacing, redrawRate.toDouble())
+
+            mimeType = when {
+                (videoFormat and MoonBridge.VIDEO_FORMAT_MASK_AV1) != 0 -> "video/av01"
+                (videoFormat and MoonBridge.VIDEO_FORMAT_MASK_H265) != 0 -> MediaFormat.MIMETYPE_VIDEO_HEVC
+                else -> MediaFormat.MIMETYPE_VIDEO_AVC
             }
 
-            mediaCodec = MediaCodec.createDecoderByType(mimeType)
-            mediaCodec?.configure(format, surface, null, 0)
-            mediaCodec?.start()
-            isRunning = true
-            AppLogger.info("Started hardware decoder for $mimeType (${width}x${height} @ ${fps}fps)", TAG)
-        } catch (e: Exception) {
-            AppLogger.error("Failed to initialize MediaCodec for $mimeType: ${e.message}", TAG)
-            listener?.onDecoderError(e.message ?: "Decoder init error")
+            spsBuffers.clear()
+            ppsBuffers.clear()
+            vpsBuffers.clear()
+            av1SequenceHeader = null
+            submittedCsd = false
+            baseTimestampUs = 0L
+            lastTimestampUs = 0L
+            lastFrameNumber = 0
+
+            return initializeDecoder()
         }
     }
 
-    fun submitDecodeUnit(data: ByteArray, offset: Int, length: Int, presentationTimeUs: Long, isKeyFrame: Boolean) {
-        if (!isRunning || mediaCodec == null) return
-
-        val startTime = System.nanoTime()
+    private fun initializeDecoder(): Int {
         try {
-            val inputBufferIndex = mediaCodec?.dequeueInputBuffer(10000L) ?: -1
-            if (inputBufferIndex >= 0) {
-                val inputBuffer = mediaCodec?.getInputBuffer(inputBufferIndex)
-                if (inputBuffer != null) {
-                    inputBuffer.clear()
-                    inputBuffer.put(data, offset, length)
-                    val flags = if (isKeyFrame) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
-                    mediaCodec?.queueInputBuffer(inputBufferIndex, 0, length, presentationTimeUs, flags)
-                }
-            } else {
-                listener?.onFrameDropped()
-            }
+            stopDecoderInternal()
 
-            // Drain output buffers
-            val bufferInfo = MediaCodec.BufferInfo()
-            var outputBufferIndex = mediaCodec?.dequeueOutputBuffer(bufferInfo, 0L) ?: -1
-            while (outputBufferIndex >= 0) {
-                // Render directly to surface zero-copy!
-                mediaCodec?.releaseOutputBuffer(outputBufferIndex, true)
-                val decodeTimeMs = (System.nanoTime() - startTime) / 1_000_000.0
-                listener?.onFrameDecoded(decodeTimeMs)
+            val format = MediaFormat.createVideoFormat(mimeType, streamWidth, streamHeight).apply {
+                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, streamWidth * streamHeight * 3 / 2)
+                setInteger(MediaFormat.KEY_FRAME_RATE, streamFps)
+                setInteger(MediaFormat.KEY_PRIORITY, 0) // Real-time priority
 
-                frameCount++
-                val now = System.currentTimeMillis()
-                if (now - lastFpsTimestamp >= 1000) {
-                    currentFps = (frameCount * 1000.0) / (now - lastFpsTimestamp)
-                    frameCount = 0
-                    lastFpsTimestamp = now
+                // Low latency mode on API 30+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
                 }
 
-                outputBufferIndex = mediaCodec?.dequeueOutputBuffer(bufferInfo, 0L) ?: -1
+                // Adaptive playback capabilities
+                setInteger(MediaFormat.KEY_MAX_WIDTH, streamWidth)
+                setInteger(MediaFormat.KEY_MAX_HEIGHT, streamHeight)
+
+                // Operating rate hint
+                setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE.toInt())
+
+                // Apply color and HDR metadata
+                hdrState.applyToMediaFormat(this)
             }
+
+            AppLogger.info("Creating decoder for $mimeType (${streamWidth}x${streamHeight} @ ${streamFps}fps)", TAG)
+            val codec = MediaCodec.createDecoderByType(mimeType)
+            codec.configure(format, surface, null, 0)
+            codec.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+            codec.start()
+
+            videoDecoder = codec
+            configuredFormat = format
+            isRunning.set(true)
+            isStopping.set(false)
+
+            startRendererThread()
+            return MoonBridge.DR_OK
         } catch (e: Exception) {
-            AppLogger.warn("Error submitting decode unit: ${e.message}", TAG)
+            AppLogger.error("Failed to initialize MediaCodec for $mimeType: ${e.message}", TAG)
+            listener?.onDecoderError(e.message ?: "Failed to initialize decoder")
+            return -1
+        }
+    }
+
+    fun start() {
+        synchronized(decoderLock) {
+            if (videoDecoder == null && isRunning.get()) {
+                initializeDecoder()
+            }
         }
     }
 
     fun stop() {
-        isRunning = false
-        try {
-            mediaCodec?.stop()
-            mediaCodec?.release()
-        } catch (e: Exception) {
-            AppLogger.warn("Error releasing MediaCodec: ${e.message}", TAG)
-        } finally {
-            mediaCodec = null
+        synchronized(decoderLock) {
+            isStopping.set(true)
+            isRunning.set(false)
+            stopDecoderInternal()
+            pacer.stop()
         }
-    }
-
-    fun setup(videoFormat: Int, width: Int, height: Int, redrawRate: Int): Int {
-        return 0
     }
 
     fun cleanup() {
         stop()
+    }
+
+    private fun stopDecoderInternal() {
+        isStopping.set(true)
+        rendererThread?.interrupt()
+        try {
+            rendererThread?.join(500)
+        } catch (ignored: InterruptedException) {}
+        rendererThread = null
+
+        videoDecoder?.let { codec ->
+            try {
+                codec.stop()
+            } catch (e: Exception) {
+                AppLogger.warn("Error stopping MediaCodec: ${e.message}", TAG)
+            }
+            try {
+                codec.release()
+            } catch (e: Exception) {
+                AppLogger.warn("Error releasing MediaCodec: ${e.message}", TAG)
+            }
+        }
+        videoDecoder = null
+    }
+
+    fun setHdrMode(enabled: Boolean, hdrMetadata: ByteArray?) {
+        synchronized(decoderLock) {
+            val changed = hdrState.update(enabled, hdrMetadata)
+            if (changed && isRunning.get()) {
+                AppLogger.info("HDR mode changed: enabled=$enabled, reconfiguring decoder", TAG)
+                initializeDecoder()
+            }
+        }
+    }
+
+    fun setSurface(newSurface: Surface) {
+        synchronized(decoderLock) {
+            this.surface = newSurface
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && videoDecoder != null) {
+                try {
+                    videoDecoder?.setOutputSurface(newSurface)
+                    return
+                } catch (e: Exception) {
+                    AppLogger.warn("setOutputSurface failed, recreating decoder: ${e.message}", TAG)
+                }
+            }
+            if (isRunning.get()) {
+                initializeDecoder()
+            }
+        }
     }
 
     fun submitDecodeUnit(
@@ -137,8 +231,200 @@ class MediaCodecDecoder(
         receiveTimeUs: Long,
         enqueueTimeUs: Long
     ): Int {
-        val isKeyFrame = frameType == 0x01
-        submitDecodeUnit(frameData, 0, length, enqueueTimeUs, isKeyFrame)
-        return 0
+        if (isStopping.get() || !isRunning.get()) {
+            return MoonBridge.DR_OK
+        }
+
+        totalFramesReceived++
+
+        // Missing frame detection
+        if (lastFrameNumber != 0 && frameNumber > lastFrameNumber + 1) {
+            val lost = frameNumber - lastFrameNumber - 1
+            totalFramesDropped += lost
+            listener?.onFrameDropped()
+        }
+
+        // Reset CSD buffer accumulation on new IDR frame
+        if (lastFrameNumber != frameNumber && frameType == MoonBridge.FRAME_TYPE_IDR) {
+            spsBuffers.clear()
+            ppsBuffers.clear()
+            vpsBuffers.clear()
+        }
+
+        lastFrameNumber = frameNumber
+
+        // Handle CSD (SPS/PPS/VPS) for H.264 and HEVC
+        if (frameType == MoonBridge.FRAME_TYPE_IDR) {
+            when (bufferType) {
+                MoonBridge.BUFFER_TYPE_SPS -> {
+                    spsBuffers.add(frameData.copyOf(length))
+                    return MoonBridge.DR_OK
+                }
+                MoonBridge.BUFFER_TYPE_PPS -> {
+                    ppsBuffers.add(frameData.copyOf(length))
+                    return MoonBridge.DR_OK
+                }
+                MoonBridge.BUFFER_TYPE_VPS -> {
+                    vpsBuffers.add(frameData.copyOf(length))
+                    return MoonBridge.DR_OK
+                }
+            }
+        }
+
+        val codec = videoDecoder ?: return MoonBridge.DR_NEED_IDR
+
+        try {
+            // Check if we need to submit pending CSD before first IDR picture data
+            if (frameType == MoonBridge.FRAME_TYPE_IDR && (!submittedCsd || spsBuffers.isNotEmpty())) {
+                submitParameterSets(codec)
+            }
+
+            // For AV1, discover sequence header if present
+            if ((videoFormat and MoonBridge.VIDEO_FORMAT_MASK_AV1) != 0 && frameType == MoonBridge.FRAME_TYPE_IDR) {
+                val obus = AV1OBUParser.parse(frameData, 0, length)
+                for (obu in obus) {
+                    if (obu.type == AV1OBUParser.OBU_SEQUENCE_HEADER) {
+                        av1SequenceHeader = obu.raw
+                        submitAV1SequenceHeader(codec, obu.raw)
+                        break
+                    }
+                }
+            }
+
+            // Dequeue input buffer with a short timeout to prevent blocking native thread
+            val inputBufferIndex = codec.dequeueInputBuffer(15000L) // 15ms timeout
+            if (inputBufferIndex < 0) {
+                AppLogger.warn("Decoder input buffer starved, requesting IDR frame", TAG)
+                totalFramesDropped++
+                listener?.onFrameDropped()
+                MoonBridge.requestIdrFrame()
+                return MoonBridge.DR_NEED_IDR
+            }
+
+            val inputBuffer = codec.getInputBuffer(inputBufferIndex) ?: run {
+                MoonBridge.requestIdrFrame()
+                return MoonBridge.DR_NEED_IDR
+            }
+
+            inputBuffer.clear()
+            if (length > inputBuffer.remaining()) {
+                AppLogger.error("Decode unit length ($length) exceeds input buffer (${inputBuffer.remaining()})", TAG)
+                codec.queueInputBuffer(inputBufferIndex, 0, 0, 0, 0)
+                MoonBridge.requestIdrFrame()
+                return MoonBridge.DR_NEED_IDR
+            }
+
+            inputBuffer.put(frameData, 0, length)
+
+            // Normalize presentation timestamp to uptime microseconds
+            if (baseTimestampUs == 0L) {
+                baseTimestampUs = (SystemClock.uptimeMillis() * 1000L) - enqueueTimeUs
+            }
+            var ptsUs = baseTimestampUs + enqueueTimeUs
+            if (ptsUs <= lastTimestampUs) {
+                ptsUs = lastTimestampUs + 1
+            }
+            lastTimestampUs = ptsUs
+
+            var flags = 0
+            if (frameType == MoonBridge.FRAME_TYPE_IDR) {
+                flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
+            }
+
+            codec.queueInputBuffer(inputBufferIndex, 0, length, ptsUs, flags)
+            return MoonBridge.DR_OK
+        } catch (e: Exception) {
+            AppLogger.error("Exception in submitDecodeUnit: ${e.message}", TAG)
+            MoonBridge.requestIdrFrame()
+            return MoonBridge.DR_NEED_IDR
+        }
+    }
+
+    private fun submitParameterSets(codec: MediaCodec) {
+        if (spsBuffers.isEmpty() && ppsBuffers.isEmpty() && vpsBuffers.isEmpty()) return
+
+        val inputIndex = codec.dequeueInputBuffer(10000L)
+        if (inputIndex >= 0) {
+            val buffer = codec.getInputBuffer(inputIndex) ?: return
+            buffer.clear()
+            for (vps in vpsBuffers) buffer.put(vps)
+            for (sps in spsBuffers) buffer.put(sps)
+            for (pps in ppsBuffers) buffer.put(pps)
+            codec.queueInputBuffer(inputIndex, 0, buffer.position(), 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+            submittedCsd = true
+        }
+    }
+
+    private fun submitAV1SequenceHeader(codec: MediaCodec, seqHeader: ByteArray) {
+        val inputIndex = codec.dequeueInputBuffer(10000L)
+        if (inputIndex >= 0) {
+            val buffer = codec.getInputBuffer(inputIndex) ?: return
+            buffer.clear()
+            buffer.put(seqHeader)
+            codec.queueInputBuffer(inputIndex, 0, seqHeader.size, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+            submittedCsd = true
+        }
+    }
+
+    private fun startRendererThread() {
+        rendererThread = Thread({
+            val bufferInfo = MediaCodec.BufferInfo()
+
+            while (!isStopping.get()) {
+                val codec = videoDecoder ?: break
+
+                try {
+                    val outIndex = codec.dequeueOutputBuffer(bufferInfo, 30000L) // 30ms timeout
+
+                    if (outIndex >= 0) {
+                        // Calculate actual decode latency
+                        val nowMs = SystemClock.uptimeMillis()
+                        val ptsMs = bufferInfo.presentationTimeUs / 1000L
+                        val deltaMs = (nowMs - ptsMs).toDouble()
+
+                        if (deltaMs in 0.0..1000.0) {
+                            totalDecodeTimeMs += deltaMs
+                            decodeTimeCount++
+                            averageDecodeTimeMs = totalDecodeTimeMs / decodeTimeCount
+                            listener?.onFrameDecoded(deltaMs)
+                        }
+
+                        // Pace output buffer release
+                        val releaseTimestampNs = pacer.calculateReleaseTimeNs()
+                        codec.releaseOutputBuffer(outIndex, releaseTimestampNs)
+                        totalFramesRendered++
+
+                        // Track FPS
+                        fpsFrameCount++
+                        if (nowMs - lastFpsTimestampMs >= 1000L) {
+                            currentFps = (fpsFrameCount * 1000.0) / (nowMs - lastFpsTimestampMs)
+                            fpsFrameCount = 0
+                            lastFpsTimestampMs = nowMs
+                        }
+                    } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        val newFormat = codec.outputFormat
+                        val width = newFormat.getInteger(MediaFormat.KEY_WIDTH)
+                        val height = newFormat.getInteger(MediaFormat.KEY_HEIGHT)
+                        AppLogger.info("MediaCodec output format changed: ${width}x${height}", TAG)
+                        listener?.onFormatChanged(width, height)
+                    } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                        // Timeout: loop around
+                    }
+                } catch (e: IllegalStateException) {
+                    if (!isStopping.get()) {
+                        AppLogger.warn("MediaCodec state exception in render loop: ${e.message}", TAG)
+                    }
+                    break
+                } catch (e: Exception) {
+                    if (!isStopping.get()) {
+                        AppLogger.warn("Exception in render loop: ${e.message}", TAG)
+                    }
+                    break
+                }
+            }
+        }, "MediaCodecRendererThread").apply {
+            priority = Thread.MAX_PRIORITY
+            start()
+        }
     }
 }

@@ -51,6 +51,39 @@ object MoonBridge {
     var videoDecoderListener: VideoDecoderRendererListener? = null
     var audioRendererListener: AudioRendererListener? = null
 
+    // Decoder return codes
+    const val DR_OK = 0
+    const val DR_NEED_IDR = -1
+
+    // Buffer types
+    const val BUFFER_TYPE_PICDATA = 0x00
+    const val BUFFER_TYPE_SPS = 0x01
+    const val BUFFER_TYPE_PPS = 0x02
+    const val BUFFER_TYPE_VPS = 0x03
+
+    // Frame types
+    const val FRAME_TYPE_PFRAME = 0x00
+    const val FRAME_TYPE_IDR = 0x01
+
+    // Video formats
+    const val VIDEO_FORMAT_H264 = 0x0001
+    const val VIDEO_FORMAT_H264_HIGH8_444 = 0x0004
+    const val VIDEO_FORMAT_H265 = 0x0100
+    const val VIDEO_FORMAT_H265_MAIN10 = 0x0200
+    const val VIDEO_FORMAT_H265_REXT8_444 = 0x0400
+    const val VIDEO_FORMAT_H265_REXT10_444 = 0x0800
+    const val VIDEO_FORMAT_AV1_MAIN8 = 0x1000
+    const val VIDEO_FORMAT_AV1_MAIN10 = 0x2000
+    const val VIDEO_FORMAT_AV1_HIGH8_444 = 0x4000
+    const val VIDEO_FORMAT_AV1_HIGH10_444 = 0x8000
+
+    // Format masks
+    const val VIDEO_FORMAT_MASK_H264 = 0x000F
+    const val VIDEO_FORMAT_MASK_H265 = 0x0F00
+    const val VIDEO_FORMAT_MASK_AV1 = 0xF000
+    const val VIDEO_FORMAT_MASK_10BIT = 0xAA00
+    const val VIDEO_FORMAT_MASK_YUV444 = 0xCC04
+
     init {
         try {
             System.loadLibrary("moonlight-bridge")
