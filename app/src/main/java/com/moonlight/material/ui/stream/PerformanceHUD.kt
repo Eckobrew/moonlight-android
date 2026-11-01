@@ -48,18 +48,19 @@ fun PerformanceHUD(
     ) {
         // Stream metrics
         Text(
-            text = "${String.format("%.1f", metrics.currentFps)} rendered FPS (${metrics.targetFps} target) · ${metrics.resolution} · ${metrics.currentCodec}",
+            text = "${String.format("%.1f", metrics.currentFps)} rendered FPS · ${metrics.resolution} · ${metrics.currentCodec}",
             style = textStyle
         )
         Text(
             text = "Decode + queue: ${String.format("%.2f", metrics.decodeTimeMs)} ms · RTT: ${String.format("%.1f", metrics.roundTripTimeMs)} ms (±${String.format("%.1f", metrics.roundTripTimeVarianceMs)})",
             style = textStyle
         )
-        Text(text = "Received: ${String.format("%.1f", metrics.receivedFps)} FPS · Decoded: ${String.format("%.1f", metrics.decodedFps)} FPS", style = textStyle)
-        Text(
-            text = "Target bitrate: ${String.format("%.1f", metrics.bitrateMbps)} Mbps · Drops: ${metrics.networkDroppedFrames} network / ${metrics.decoderDroppedFrames} decoder",
-            style = if (metrics.networkDroppedFrames > 0 || metrics.decoderDroppedFrames > 0) warningStyle else textStyle
-        )
+        if (metrics.networkDroppedFrames > 0 || metrics.decoderDroppedFrames > 0) {
+            Text(
+                text = "Dropped: ${metrics.networkDroppedFrames} network / ${metrics.decoderDroppedFrames} decoder",
+                style = warningStyle
+            )
+        }
 
         // Host hardware metrics (if active and available)
         if (hostStatistics != null) {

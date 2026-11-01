@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.SportsEsports
@@ -55,6 +56,16 @@ fun StreamingScreen(
 
     var touchAreaSize by remember { mutableStateOf(IntSize.Zero) }
     var showKeyboardOverlay by remember { mutableStateOf(false) }
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    var keyboardWasVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(showKeyboardOverlay, imeVisible) {
+        if (!showKeyboardOverlay) keyboardWasVisible = false
+        else if (imeVisible) keyboardWasVisible = true
+        else if (keyboardWasVisible) {
+            showKeyboardOverlay = false
+            keyboardWasVisible = false
+        }
+    }
     var controllerEnabled by rememberSaveable { mutableStateOf(settings.features.touchOverlayEnabled) }
     val context = LocalContext.current
     var physicalControllerConnected by remember { mutableStateOf(false) }
@@ -187,33 +198,6 @@ fun StreamingScreen(
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
             )
-        }
-
-        // Always reachable, including while connecting. Keep clear of virtual buttons.
-        if (!showControlsSheet) {
-            Row(
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val originalButtonStyle = Modifier.size(40.dp)
-                    .background(MidnightBlue.copy(alpha = 0.7f), CircleShape)
-                IconButton(onClick = { showKeyboardOverlay = !showKeyboardOverlay }, enabled = stageName == "Connected", modifier = originalButtonStyle) {
-                    Icon(Icons.Default.Keyboard, if (showKeyboardOverlay) "Hide Keyboard" else "Show Keyboard",
-                        tint = CyanAccent, modifier = Modifier.size(20.dp))
-                }
-                IconButton(onClick = { showKeyboardOverlay = false; session.openSessionControls() }, modifier = originalButtonStyle) {
-                    Icon(Icons.Default.Tune, "Session Controls", tint = CyanAccent, modifier = Modifier.size(20.dp))
-                }
-                IconButton(onClick = {
-                    controllerEnabled = !controllerEnabled
-                    onControllerVisibilityChanged(controllerEnabled)
-                }, enabled = !physicalControllerConnected, modifier = originalButtonStyle) {
-                    Icon(Icons.Default.SportsEsports,
-                        if (physicalControllerConnected) "Controller hidden: physical controller connected"
-                        else if (controllerEnabled) "Hide On-screen Controller" else "Show On-screen Controller",
-                        tint = CyanAccent, modifier = Modifier.size(20.dp))
-                }
-            }
         }
 
         // On-Screen Keyboard Bar
