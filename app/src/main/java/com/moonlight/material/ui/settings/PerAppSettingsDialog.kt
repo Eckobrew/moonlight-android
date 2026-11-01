@@ -1,6 +1,8 @@
 package com.moonlight.material.ui.settings
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -13,6 +15,7 @@ import com.moonlight.material.core.models.StreamApp
 import com.moonlight.material.core.models.VideoCodec
 import com.moonlight.material.ui.theme.*
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PerAppSettingsDialog(
     host: Host,
@@ -43,15 +46,20 @@ fun PerAppSettingsDialog(
             }
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 // Resolution override
                 Text("Resolution Override", style = MaterialTheme.typography.bodyMedium, color = CyanAccent)
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = overrides.width == null,
                         onClick = { overrides = overrides.copy(width = null, height = null) },
                         label = { Text("Inherit Global") }
+                    )
+                    FilterChip(
+                        selected = overrides.width == 0 && overrides.height == 0,
+                        onClick = { overrides = overrides.copy(width = 0, height = 0) },
+                        label = { Text("Native") }
                     )
                     FilterChip(
                         selected = overrides.width == 1920,
@@ -70,7 +78,7 @@ fun PerAppSettingsDialog(
                 // Frame rate override
                 Text("Frame Rate Override", style = MaterialTheme.typography.bodyMedium, color = CyanAccent)
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = overrides.fps == null,
                         onClick = { overrides = overrides.copy(fps = null) },
@@ -90,10 +98,15 @@ fun PerAppSettingsDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                Row {
+                    FilterChip(selected = overrides.fps == 144,
+                        onClick = { overrides = overrides.copy(fps = 144) }, label = { Text("144fps") })
+                }
+
                 // Codec override
                 Text("Codec Override", style = MaterialTheme.typography.bodyMedium, color = CyanAccent)
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = overrides.codec == null,
                         onClick = { overrides = overrides.copy(codec = null) },

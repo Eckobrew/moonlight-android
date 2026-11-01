@@ -120,11 +120,13 @@ fun SettingsScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings) -> Unit) {
     SectionCard(title = "Resolution & Refresh Rate") {
         // Preset Resolutions
         val resolutions = listOf(
+            Pair("Native", Pair(0, 0)),
             Pair("720p (1280x720)", Pair(1280, 720)),
             Pair("1080p (1920x1080)", Pair(1920, 1080)),
             Pair("1440p (2560x1440)", Pair(2560, 1440)),
@@ -133,7 +135,7 @@ private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
 
         Text("Resolution", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
         Spacer(modifier = Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             resolutions.forEach { (label, dims) ->
                 val isSelected = settings.width == dims.first && settings.height == dims.second
                 FilterChip(
@@ -151,13 +153,21 @@ private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
         Text("Frame Rate: ${settings.fps} FPS", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
         Spacer(modifier = Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            fpsList.forEach { fpsVal ->
+            fpsList.filter { it != 144 }.forEach { fpsVal ->
                 FilterChip(
                     selected = settings.fps == fpsVal,
                     onClick = { onUpdate(settings.copy(fps = fpsVal)) },
                     label = { Text("${fpsVal}fps") }
                 )
             }
+        }
+
+        Row(modifier = Modifier.fillMaxWidth()) {
+            FilterChip(
+                selected = settings.fps == 144,
+                onClick = { onUpdate(settings.copy(fps = 144)) },
+                label = { Text("144fps") }
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -176,7 +186,7 @@ private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
 
         // Remote Bitrate Override
         SettingToggle(
-            title = "Custom Bitrate for Remote Sessions",
+            title = "Custom Bitrate for Remote / Metered Connections",
             checked = settings.enableRemoteBitrate,
             onCheckedChange = { onUpdate(settings.copy(enableRemoteBitrate = it)) }
         )
@@ -274,11 +284,19 @@ private fun AudioSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
 @Composable
 private fun InputSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings) -> Unit) {
     SectionCard(title = "Mouse & Pointer") {
-        SettingToggle(
-            title = "Desktop Mouse Mode (Absolute Pointer)",
-            checked = settings.features.desktopMouse,
-            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(desktopMouse = it))) }
-        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { onUpdate(settings.copy(features = settings.features.copy(desktopMouse = false))) },
+                modifier = Modifier.weight(1f), colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)) {
+                Text(if (!settings.features.desktopMouse) "✓ Touchscreen" else "Touchscreen")
+            }
+            OutlinedButton(onClick = { onUpdate(settings.copy(features = settings.features.copy(desktopMouse = true))) },
+                modifier = Modifier.weight(1f), colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)) {
+                Text(if (settings.features.desktopMouse) "✓ Touchpad" else "Touchpad")
+            }
+        }
+        Text(if (settings.features.desktopMouse) "Move the pointer with relative finger movements."
+            else "Send native touch to Sunshine, with mouse fallback for unsupported hosts.",
+            style = MaterialTheme.typography.bodySmall, color = TextSecondary)
 
         Text("Mouse Sensitivity: ${String.format("%.1f", settings.mouseSensitivityX)}x", color = TextSecondary)
         Slider(
