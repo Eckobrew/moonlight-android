@@ -16,6 +16,7 @@ import com.moonlight.material.networking.TCPProbe
 import com.moonlight.material.stream.audio.AudioPlaybackEngine
 import com.moonlight.material.stream.input.GamepadHandler
 import com.moonlight.material.stream.input.GamepadListener
+import com.moonlight.material.stream.input.KeycodeMappings
 import com.moonlight.material.stream.input.MouseEventListener
 import com.moonlight.material.stream.input.TouchMouseHandler
 import com.moonlight.material.stream.video.MediaCodecDecoder
@@ -457,10 +458,10 @@ class StreamSessionController(
         metricsJob = null
     }
 
-    fun stopSession() {
+    fun stopSession(forceQuitApp: Boolean? = null) {
         sessionGeneration++
         val hostToQuit = activeHost
-        val shouldQuit = shouldQuitHostAppOnStop
+        val shouldQuit = forceQuitApp ?: shouldQuitHostAppOnStop
 
         if (!_isStreaming.value) return
         _isStreaming.value = false
@@ -507,6 +508,29 @@ class StreamSessionController(
                 }
             }
         }
+    }
+
+    fun disconnectStream() {
+        stopSession(forceQuitApp = false)
+    }
+
+    fun quitRunningApp() {
+        stopSession(forceQuitApp = true)
+    }
+
+    fun sendUtf8Text(text: String) {
+        try {
+            MoonBridge.sendUtf8Text(text)
+        } catch (t: Throwable) {
+            AppLogger.error("Failed to send UTF-8 text: ${t.message}", TAG)
+        }
+    }
+
+    fun sendHostKeyPress(vk: Short, extended: Boolean = false) {
+        val wireCode = (vk.toInt() or 0x8000).toShort()
+        val flags: Byte = if (extended) KeycodeMappings.MODIFIER_EXTENDED else 0
+        sendKeyboardEvent(wireCode, true, 0, flags)
+        sendKeyboardEvent(wireCode, false, 0, flags)
     }
 
     fun sendKeyboardEvent(keyCode: Short, isDown: Boolean, modifiers: Byte = 0, flags: Byte = 0) {

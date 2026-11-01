@@ -2,6 +2,7 @@ package com.moonlight.material.ui.stream
 
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -33,8 +34,18 @@ fun StreamingScreen(
     val sessionError by session.sessionError.collectAsState()
     val metrics by session.metrics.collectAsState()
     val showHUD by session.showPerformanceOverlay.collectAsState()
+    val showControlsSheet by session.showSessionControls.collectAsState()
 
-    var showControlsSheet by remember { mutableStateOf(false) }
+    var showKeyboardOverlay by remember { mutableStateOf(false) }
+
+    // Intercept back gesture & back button during active streaming
+    BackHandler(enabled = isStreaming) {
+        when {
+            showKeyboardOverlay -> showKeyboardOverlay = false
+            showControlsSheet -> session.closeSessionControls()
+            else -> session.openSessionControls()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -105,7 +116,7 @@ fun StreamingScreen(
             )
         }
 
-        // Performance HUD overlay
+        // Performance HUD overlay (text-only in top right)
         if (showHUD && stageName == "Connected") {
             val hostStats by session.hostStatistics.collectAsState()
             PerformanceHUD(
@@ -117,10 +128,10 @@ fun StreamingScreen(
             )
         }
 
-        // Floating Session Controls button
+        // Floating Session Controls button (top center)
         if (stageName == "Connected") {
             IconButton(
-                onClick = { showControlsSheet = true },
+                onClick = { session.openSessionControls() },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 12.dp)
@@ -136,11 +147,28 @@ fun StreamingScreen(
             }
         }
 
-        // Controls Bottom Sheet
+        // On-Screen Keyboard Bar
+        if (showKeyboardOverlay && stageName == "Connected") {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            ) {
+                StreamKeyboardBar(
+                    session = session,
+                    onClose = { showKeyboardOverlay = false }
+                )
+            }
+        }
+
+        // Session Controls Bottom Sheet
         if (showControlsSheet) {
             SessionControlsSheet(
                 session = session,
-                onDismiss = { showControlsSheet = false }
+                app = app,
+                onShowKeyboard = { showKeyboardOverlay = true },
+                onFinish = onFinish,
+                onDismiss = { session.closeSessionControls() }
             )
         }
 

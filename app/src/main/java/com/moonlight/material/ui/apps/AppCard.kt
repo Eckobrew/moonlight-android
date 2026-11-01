@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -31,7 +32,8 @@ fun AppCard(
     host: Host,
     app: StreamApp,
     onLaunch: () -> Unit,
-    onConfigureOverrides: () -> Unit
+    onConfigureOverrides: () -> Unit,
+    onPinShortcut: () -> Unit = {}
 ) {
     val isRunning = app.matchesRunning(host)
 
@@ -90,21 +92,40 @@ fun AppCard(
                 }
             }
 
-            // Per-app settings shortcut button
-            IconButton(
-                onClick = onConfigureOverrides,
+            // Action buttons (Pin to home & Per-app settings)
+            Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .size(32.dp)
-                    .background(DeepNavy.copy(alpha = 0.6f), CircleShape)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Game Settings",
-                    tint = TextPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
+                IconButton(
+                    onClick = onPinShortcut,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(DeepNavy.copy(alpha = 0.6f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AddLink,
+                        contentDescription = "Pin Shortcut to Home",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onConfigureOverrides,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(DeepNavy.copy(alpha = 0.6f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Game Settings",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
 

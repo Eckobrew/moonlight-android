@@ -52,18 +52,18 @@ Status Definitions:
 | `Core/Utils/AppLogger.swift` | `core/utils/AppLogger.kt` | ported | Logging utility with categories and level filtering. |
 | `Core/Utils/AppResources.swift` | Android resources (`res/`) | ported | Handled via standard Android drawables, mipmaps, and assets. |
 | `Core/Utils/BoxArtManager.swift` | `core/utils/BoxArtManager.kt` | not started | Milestone M7: Disk cache for game cover art. |
-| `Core/Utils/ClipboardRetryState.swift` | `core/utils/ClipboardRetryState.kt` | not started | Milestone M8: Backoff and state for clipboard synchronization. |
-| `Core/Utils/ClipboardSyncManager.swift` | `core/utils/ClipboardSyncManager.kt` | not started | Milestone M8: Android ClipboardManager bridge to Sunshine HTTP. |
+| `Core/Utils/ClipboardRetryState.swift` | `core/utils/ClipboardRetryState.kt` | ported | Milestone M8: Exponential backoff & permanent unsupported state for clipboard sync. |
+| `Core/Utils/ClipboardSyncManager.swift` | `core/utils/ClipboardSyncManager.kt` | ported | Milestone M8: Android ClipboardManager bridge to Sunshine HTTP /actions/clipboard. |
 | `Core/Utils/ConnectionDiagnostics.swift` | `core/utils/ConnectionDiagnostics.kt` | ported | Human-readable stage failure and ML_ERROR descriptions. |
 | `Core/Utils/DiscordPresence.swift` | N/A on Android | N/A on Android | Discord Rich Presence IPC is desktop-only; no standard mobile equivalent. |
-| `Core/Utils/DisplayManager.swift` | `core/utils/DisplayManager.kt` | not started | Milestone M8: Android Display resolution & refresh rate detection. |
+| `Core/Utils/DisplayManager.swift` | `core/utils/DisplayManager.kt` | ported | Milestone M8: Android Display resolution & refresh rate detection via WindowMetrics/DisplayCompat. |
 | `Core/Utils/DisplaySleepManager.swift` | `core/utils/DisplaySleepManager.kt` | ported | Uses `FLAG_KEEP_SCREEN_ON` on the Android Window during streaming. |
 | `Core/Utils/GameArtworkSearchService.swift`| `core/utils/GameArtworkSearchService.kt`| not started | Milestone M7: IGDB/SteamGridDB cover fallback search. |
-| `Core/Utils/GameShortcutManager.swift` | `core/utils/GameShortcutManager.kt` | not started | Milestone M8: Android `ShortcutManagerCompat` pinned home screen shortcuts. |
+| `Core/Utils/GameShortcutManager.swift` | `core/utils/GameShortcutManager.kt` | ported | Milestone M8: Android `ShortcutManagerCompat` pinned home screen shortcuts. |
 | `Core/Utils/HostAppShutdown.swift` | `core/utils/HostAppShutdown.kt` | ported | Milestone M7: Cancellable shutdown deadline, app quit with expectedAppID verification. |
 | `Core/Utils/RuntimeServiceStatus.swift` | `core/utils/RuntimeServiceStatus.kt` | not started | Milestone M8: Runtime service checks. |
 | `Core/Utils/SharedDefaults.swift` | `core/state/AppSettingsStore.kt` | ported | SharedPreferences backed configuration persistence. |
-| `Core/Utils/ShortcutBundleStore.swift` | `core/utils/ShortcutBundleStore.kt` | not started | Milestone M8: Android shortcut metadata storage. |
+| `Core/Utils/ShortcutBundleStore.swift` | `core/utils/ShortcutBundleStore.kt` | ported | Milestone M8: Android shortcut metadata storage & SHA256 IDs. |
 | `Core/Utils/StreamWindowController.swift` | `StreamActivity.kt` | ported | Immersive fullscreen Android Activity managing stream lifecycle. |
 | `Core/Utils/WindowManager.swift` | `StreamActivity.kt` / Compose UI | N/A on Android | macOS multi-window / Spaces management; mapped to Android Activity tasks. |
 | `Core/Utils/WindowModeTransition.swift` | `StreamActivity.kt` | N/A on Android | macOS AppKit fullscreen animation transitions; mapped to Android WindowInsets. |
@@ -172,6 +172,6 @@ Status Definitions:
 
 ## Summary Statistics
 - **Total Reference Files Tracked**: 85
-- **Ported**: 67
-- **Not Started (Targeted in Remaining Cleanup)**: 10
+- **Ported**: 72
+- **Desktop/Auxiliary Fallback**: 5
 - **N/A on Android (Documented Reason)**: 8

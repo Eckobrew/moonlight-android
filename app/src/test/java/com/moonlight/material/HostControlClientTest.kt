@@ -172,6 +172,10 @@ class HostControlClientTest {
         assertEquals("2", apps.first().artVersion)
         val changed = apps[0].copy(id = 21)
         assertEquals(changed.stableIdentity, apps[0].stableIdentity)
+        assertEquals(
+            com.moonlight.material.core.utils.ShortcutBundleStore.identifier(host, changed),
+            com.moonlight.material.core.utils.ShortcutBundleStore.identifier(host, apps[0])
+        )
     }
 
     @Test

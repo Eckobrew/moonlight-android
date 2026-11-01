@@ -170,6 +170,8 @@ fun AppGridScreen(
                     )
                 }
             } else {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val currentSettings by appState.settings.collectAsState()
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 140.dp),
                     contentPadding = PaddingValues(16.dp),
@@ -184,6 +186,14 @@ fun AppGridScreen(
                             onLaunch = { onLaunchApp(app) },
                             onConfigureOverrides = {
                                 appState.perAppSettingsApp.value = app
+                            },
+                            onPinShortcut = {
+                                com.moonlight.material.core.utils.GameShortcutManager.pinGameShortcut(
+                                    context = context,
+                                    host = host,
+                                    app = app,
+                                    settings = currentSettings
+                                )
                             }
                         )
                     }

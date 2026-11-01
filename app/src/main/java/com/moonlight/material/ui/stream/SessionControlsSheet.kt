@@ -6,7 +6,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Monitor
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.moonlight.material.core.models.StreamApp
 import com.moonlight.material.core.state.StreamSessionController
 import com.moonlight.material.ui.theme.*
 
@@ -21,6 +24,9 @@ import com.moonlight.material.ui.theme.*
 @Composable
 fun SessionControlsSheet(
     session: StreamSessionController,
+    app: StreamApp,
+    onShowKeyboard: () -> Unit,
+    onFinish: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val currentKbps by session.runtimeBitrateKbps.collectAsState()
@@ -32,6 +38,7 @@ fun SessionControlsSheet(
     val activeHost = session.activeHost
 
     var commandsMenuExpanded by remember { mutableStateOf(false) }
+    var showQuitConfirmDialog by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -41,32 +48,84 @@ fun SessionControlsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp)
+                .padding(horizontal = 24.dp, vertical = 16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text(
-                text = "Session Controls",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
+            // Header: App Title and Host
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = app.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "Streaming from ${activeHost?.name ?: "Host"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close Menu", tint = TextSecondary)
+                }
+            }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Live runtime bitrate adjustment
+            // Quick Action: Show Keyboard
+            OutlinedButton(
+                onClick = {
+                    onDismiss()
+                    onShowKeyboard()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
+            ) {
+                Icon(Icons.Default.Keyboard, contentDescription = null)
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Show On-Screen Keyboard",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Set Bitrate Section
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = CardNavy,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Live Bitrate: ${String.format("%.1f", bitrateMbps)} Mbps",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = CyanAccent
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Set Bitrate",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "${String.format("%.1f", bitrateMbps)} Mbps",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = CyanAccent
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
+
                     Slider(
                         value = bitrateMbps.toFloat(),
                         onValueChange = { bitrateMbps = it.toDouble() },
@@ -74,17 +133,40 @@ fun SessionControlsSheet(
                         enabled = !isApplyingBitrate,
                         colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
                     )
-                    Button(
-                        onClick = { session.applyRuntimeBitrate(bitrateMbps) },
-                        enabled = !isApplyingBitrate,
-                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
-                        modifier = Modifier.align(Alignment.End)
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Preset Chips and Apply Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (isApplyingBitrate) "Applying…" else "Apply",
-                            color = DeepNavy,
-                            fontWeight = FontWeight.Bold
-                        )
+                        listOf(10.0, 20.0, 50.0, 80.0).forEach { preset ->
+                            FilterChip(
+                                selected = kotlin.math.abs(bitrateMbps - preset) < 0.5,
+                                onClick = { bitrateMbps = preset },
+                                label = { Text("${preset.toInt()}M") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = CyanAccent,
+                                    selectedLabelColor = DeepNavy
+                                )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        Button(
+                            onClick = { session.applyRuntimeBitrate(bitrateMbps) },
+                            enabled = !isApplyingBitrate,
+                            colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
+                        ) {
+                            Text(
+                                text = if (isApplyingBitrate) "Applying…" else "Apply",
+                                color = DeepNavy,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -97,7 +179,10 @@ fun SessionControlsSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Show Performance HUD", color = TextPrimary)
+                Column {
+                    Text("Performance HUD", color = TextPrimary, fontWeight = FontWeight.Medium)
+                    Text("Monospace text metrics in top right", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                }
                 Switch(
                     checked = showHUD,
                     onCheckedChange = { session.togglePerformanceOverlay() },
@@ -114,9 +199,9 @@ fun SessionControlsSheet(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Include Host Statistics", color = TextPrimary)
+                        Text("Host CPU / GPU Statistics", color = TextPrimary, fontWeight = FontWeight.Medium)
                         Text(
-                            "Samples CPU/GPU telemetry while HUD is visible.",
+                            "Samples Sunshine CPU & GPU usage on HUD",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -188,21 +273,84 @@ fun SessionControlsSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Disconnect button
             Button(
                 onClick = {
-                    session.stopSession()
                     onDismiss()
+                    session.disconnectStream()
+                    onFinish()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = RoseError),
+                colors = ButtonDefaults.buttonColors(containerColor = CardNavy),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.Close, null, tint = TextPrimary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Disconnect Stream", color = TextPrimary, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text("Disconnect Stream", color = TextPrimary, fontWeight = FontWeight.Bold)
+                    Text("Leave game running on host to resume later", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                }
             }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Quit Game button
+            Button(
+                onClick = { showQuitConfirmDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = RoseError.copy(alpha = 0.9f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.PowerSettingsNew, null, tint = TextPrimary)
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text("Quit Game", color = TextPrimary, fontWeight = FontWeight.Bold)
+                    Text("Terminate app on host PC", style = MaterialTheme.typography.bodySmall, color = TextPrimary.copy(alpha = 0.85f))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
         }
+    }
+
+    // Quit Game Confirmation Dialog
+    if (showQuitConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showQuitConfirmDialog = false },
+            title = {
+                Text(
+                    text = "Quit Game on Host?",
+                    color = RoseError,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to terminate ${app.title}? Any unsaved progress on the host will be lost.",
+                    color = TextPrimary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showQuitConfirmDialog = false
+                        onDismiss()
+                        session.quitRunningApp()
+                        onFinish()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseError)
+                ) {
+                    Text("Quit Game", color = TextPrimary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQuitConfirmDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = MidnightBlue
+        )
     }
 }

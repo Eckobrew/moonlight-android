@@ -85,7 +85,11 @@ class StreamActivity : ComponentActivity() {
         }
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (::sessionController.isInitialized && sessionController.isStreaming.value) {
-                sessionController.openSessionControls()
+                if (sessionController.showSessionControls.value) {
+                    sessionController.closeSessionControls()
+                } else {
+                    sessionController.openSessionControls()
+                }
                 return true
             }
             return super.onKeyDown(keyCode, event)

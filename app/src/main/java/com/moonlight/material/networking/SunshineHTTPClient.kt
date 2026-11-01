@@ -21,9 +21,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.w3c.dom.Element
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
@@ -338,6 +340,34 @@ class SunshineHTTPClient(
             }
         } catch (e: Exception) {
             false
+        }
+    }
+
+    suspend fun getClipboardContent(host: Host): String = withContext(Dispatchers.IO) {
+        val uniqueId = uniqueID()
+        val url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/actions/clipboard?type=text&uniqueid=$uniqueId"
+        val client = getClientForHost(host)
+        val request = Request.Builder().url(url).build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw HostControlError(response.code, "Server returned HTTP ${response.code}")
+            }
+            response.body?.string() ?: ""
+        }
+    }
+
+    suspend fun sendClipboardContent(host: Host, text: String) = withContext(Dispatchers.IO) {
+        val uniqueId = uniqueID()
+        val uuid = UUID.randomUUID().toString().replace("-", "").lowercase()
+        val url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/actions/clipboard?uniqueid=$uniqueId&uuid=$uuid&type=text"
+        val client = getClientForHost(host)
+        val mediaType = "text/plain; charset=utf-8".toMediaType()
+        val body = text.toRequestBody(mediaType)
+        val request = Request.Builder().url(url).post(body).build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw HostControlError(response.code, "Server returned HTTP ${response.code}")
+            }
         }
     }
 
