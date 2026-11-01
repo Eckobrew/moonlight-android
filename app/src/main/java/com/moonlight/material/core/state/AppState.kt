@@ -1,0 +1,281 @@
+package com.moonlight.material.core.state
+
+import android.content.Context
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.moonlight.material.core.models.AppStreamOverrides
+import com.moonlight.material.core.models.Host
+import com.moonlight.material.core.models.HostStatus
+import com.moonlight.material.core.models.StreamApp
+import com.moonlight.material.core.models.StreamSettings
+import com.moonlight.material.core.security.CertificateManager
+import com.moonlight.material.core.utils.AppLogger
+import com.moonlight.material.networking.BonjourDiscoveryService
+import com.moonlight.material.networking.PairingService
+import com.moonlight.material.networking.SunshineHTTPClient
+import com.moonlight.material.networking.WakeOnLAN
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class AppState(context: Context) : ViewModel() {
+    private val TAG = "APP_STATE"
+    private val settingsStore = AppSettingsStore(context)
+    val certificateManager = CertificateManager.initialize(context)
+    val httpClient = SunshineHTTPClient(certificateManager)
+    val pairingService = PairingService(httpClient, certificateManager)
+    private val discoveryService = BonjourDiscoveryService(context)
+
+    val sessionController = StreamSessionController(httpClient)
+
+    private val _settings = MutableStateFlow(settingsStore.loadSettings())
+    val settings: StateFlow<StreamSettings> = _settings.asStateFlow()
+
+    private val _hosts = MutableStateFlow(settingsStore.loadHosts())
+    val hosts: StateFlow<List<Host>> = _hosts.asStateFlow()
+
+    private val _selectedHost = MutableStateFlow<Host?>(null)
+    val selectedHost: StateFlow<Host?> = _selectedHost.asStateFlow()
+
+    private val _appsForSelectedHost = MutableStateFlow<List<StreamApp>>(emptyList())
+    val appsForSelectedHost: StateFlow<List<StreamApp>> = _appsForSelectedHost.asStateFlow()
+
+    private val _isLoadingApps = MutableStateFlow(false)
+    val isLoadingApps: StateFlow<Boolean> = _isLoadingApps.asStateFlow()
+
+    private val _isRefreshingHosts = MutableStateFlow(false)
+    val isRefreshingHosts: StateFlow<Boolean> = _isRefreshingHosts.asStateFlow()
+
+    // Dialog & Screen Visibility
+    val isShowingSettings = MutableStateFlow(false)
+    val isShowingAddHost = MutableStateFlow(false)
+    val isShowingLogs = MutableStateFlow(false)
+    val hostDetailsToShow = MutableStateFlow<Host?>(null)
+    val pairingHost = MutableStateFlow<Host?>(null)
+    val pairingPin = MutableStateFlow<String?>(null)
+    val pairingStageMessage = MutableStateFlow<String?>(null)
+    val perAppSettingsApp = MutableStateFlow<StreamApp?>(null)
+
+    val hostActionMessage = MutableStateFlow<String?>(null)
+
+    init {
+        // Start mDNS host discovery if enabled
+        if (_settings.value.features.enableMdns) {
+            discoveryService.startDiscovery()
+            viewModelScope.launch {
+                discoveryService.discoveredHosts.collect { discovered ->
+                    handleDiscoveredHost(discovered.name, discovered.hostAddress, discovered.port)
+                }
+            }
+        }
+
+        refreshHosts()
+    }
+
+    fun updateSettings(newSettings: StreamSettings) {
+        _settings.value = newSettings
+        settingsStore.saveSettings(newSettings)
+    }
+
+    fun refreshHosts() {
+        viewModelScope.launch {
+            _isRefreshingHosts.value = true
+            val currentList = _hosts.value.toList()
+            val updated = mutableListOf<Host>()
+
+            for (h in currentList) {
+                try {
+                    val (refreshed, _) = httpClient.fetchServerInfo(h)
+                    updated.add(refreshed)
+                } catch (e: Exception) {
+                    updated.add(h.copy(status = HostStatus.OFFLINE))
+                }
+            }
+
+            _hosts.value = updated
+            settingsStore.saveHosts(updated)
+            _isRefreshingHosts.value = false
+        }
+    }
+
+    private fun handleDiscoveredHost(name: String, address: String, port: Int) {
+        viewModelScope.launch {
+            val existing = _hosts.value.find { it.address == address || (it.name == name && it.address == address) }
+            if (existing == null) {
+                val newHost = Host(
+                    name = name,
+                    address = address,
+                    httpPort = port,
+                    status = HostStatus.UNKNOWN
+                )
+                try {
+                    val (probed, _) = httpClient.fetchServerInfo(newHost)
+                    addOrUpdateHost(probed)
+                } catch (e: Exception) {
+                    addOrUpdateHost(newHost)
+                }
+            }
+        }
+    }
+
+    fun addManualHost(name: String, address: String, port: Int) {
+        viewModelScope.launch {
+            val candidate = Host(
+                name = name.ifEmpty { "Host ($address)" },
+                address = address,
+                httpPort = port,
+                status = HostStatus.UNKNOWN
+            )
+            try {
+                val (refreshed, _) = httpClient.fetchServerInfo(candidate)
+                addOrUpdateHost(refreshed)
+            } catch (e: Exception) {
+                addOrUpdateHost(candidate.copy(status = HostStatus.OFFLINE))
+            }
+            isShowingAddHost.value = false
+        }
+    }
+
+    fun addOrUpdateHost(host: Host) {
+        val current = _hosts.value.toMutableList()
+        val index = current.indexOfFirst { it.address == host.address || (it.serverId != null && it.serverId == host.serverId) }
+        if (index >= 0) {
+            current[index] = host
+        } else {
+            current.add(host)
+        }
+        _hosts.value = current
+        settingsStore.saveHosts(current)
+    }
+
+    fun deleteHost(host: Host) {
+        val current = _hosts.value.toMutableList()
+        current.removeAll { it.id == host.id }
+        _hosts.value = current
+        settingsStore.saveHosts(current)
+        if (_selectedHost.value?.id == host.id) {
+            _selectedHost.value = null
+        }
+    }
+
+    fun unpairHost(host: Host) {
+        viewModelScope.launch {
+            httpClient.unpair(host)
+            val updated = host.copy(
+                isPaired = false,
+                serverCertificateDER = null,
+                status = HostStatus.PAIRING_REQUIRED
+            )
+            addOrUpdateHost(updated)
+        }
+    }
+
+    fun wakeHost(host: Host) {
+        val mac = host.macAddress
+        if (mac.isNullOrEmpty()) {
+            hostActionMessage.value = "Cannot send Wake-on-LAN: MAC address unknown."
+            return
+        }
+
+        viewModelScope.launch {
+            addOrUpdateHost(host.copy(status = HostStatus.WAKING))
+            WakeOnLAN.wake(mac)
+
+            // Poll for up to 45 seconds for host to wake up
+            for (i in 0 until 15) {
+                delay(3000)
+                try {
+                    val (refreshed, _) = httpClient.fetchServerInfo(host)
+                    if (refreshed.status == HostStatus.ONLINE || refreshed.status == HostStatus.STREAMING) {
+                        addOrUpdateHost(refreshed)
+                        hostActionMessage.value = "${refreshed.name} is now awake and ready!"
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    // Still waking
+                }
+            }
+            addOrUpdateHost(host.copy(status = HostStatus.OFFLINE))
+            hostActionMessage.value = "Host did not wake up within 45 seconds."
+        }
+    }
+
+    fun startPairing(host: Host) {
+        pairingHost.value = host
+        pairingPin.value = null
+        pairingStageMessage.value = "Generating PIN…"
+
+        viewModelScope.launch {
+            try {
+                val pairedHost = pairingService.pair(
+                    host = host,
+                    onPinGenerated = { pin ->
+                        pairingPin.value = pin
+                    },
+                    onProgress = { stage, message ->
+                        pairingStageMessage.value = "[Stage $stage/5] $message"
+                    }
+                )
+                addOrUpdateHost(pairedHost)
+                pairingHost.value = null
+                pairingPin.value = null
+                hostActionMessage.value = "Successfully paired with ${pairedHost.name}!"
+            } catch (e: Exception) {
+                pairingStageMessage.value = "Pairing failed: ${e.message}"
+                delay(3000)
+                pairingHost.value = null
+            }
+        }
+    }
+
+    fun selectHost(host: Host) {
+        _selectedHost.value = host
+        loadApps(host)
+    }
+
+    fun deselectHost() {
+        _selectedHost.value = null
+        _appsForSelectedHost.value = emptyList()
+    }
+
+    fun loadApps(host: Host) {
+        viewModelScope.launch {
+            _isLoadingApps.value = true
+            try {
+                val apps = httpClient.fetchAppList(host)
+                _appsForSelectedHost.value = apps
+            } catch (e: Exception) {
+                AppLogger.error("Failed to load apps: ${e.message}", TAG)
+                _appsForSelectedHost.value = emptyList()
+            } finally {
+                _isLoadingApps.value = false
+            }
+        }
+    }
+
+    fun quitRunningAppOnHost(host: Host) {
+        viewModelScope.launch {
+            httpClient.quitApp(host)
+            delay(500)
+            loadApps(host)
+            refreshHosts()
+        }
+    }
+
+    fun getAppOverrides(host: Host, app: StreamApp): AppStreamOverrides {
+        return settingsStore.loadAppOverrides(host.id, app.id)
+    }
+
+    fun saveAppOverrides(host: Host, app: StreamApp, overrides: AppStreamOverrides) {
+        settingsStore.saveAppOverrides(host.id, app.id, overrides)
+    }
+
+    fun getEffectiveSettingsForApp(host: Host, app: StreamApp): StreamSettings {
+        val overrides = getAppOverrides(host, app)
+        return overrides.applyTo(_settings.value)
+    }
+}
