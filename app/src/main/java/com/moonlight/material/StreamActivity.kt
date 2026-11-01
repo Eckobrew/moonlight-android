@@ -62,6 +62,8 @@ class StreamActivity : ComponentActivity() {
             com.moonlight.material.networking.NetworkReachability(this).getCurrentState().isMetered
         }
 
+        sessionController.isShortcutMode = intent.getBooleanExtra("EXTRA_SHORTCUT_MODE", false)
+
         setContent {
             MoonlightTheme {
                 StreamingScreen(

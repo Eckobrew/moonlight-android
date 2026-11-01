@@ -2,6 +2,13 @@ package com.moonlight.material
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
+import androidx.compose.runtime.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import com.moonlight.material.core.utils.GameShortcutManager
+import com.moonlight.material.core.models.StreamSettings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -31,6 +38,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class MainActivity : ComponentActivity() {
+    private var shortcutJob: Job? = null
+    private var shortcutLaunching by mutableStateOf(false)
 
     private val appState by viewModels<AppState> {
         object : androidx.lifecycle.ViewModelProvider.Factory {
@@ -51,6 +60,11 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = DeepNavy
                 ) {
+                    if (shortcutLaunching) {
+                        AlertDialog(onDismissRequest = {}, title = { Text("Opening shortcut") },
+                            text = { Text("Connecting to the PC and finding the current application…") },
+                            confirmButton = { TextButton(onClick = { shortcutJob?.cancel(); shortcutLaunching = false }) { Text("Cancel") } })
+                    }
                     val hostMessage by appState.hostActionMessage.collectAsState()
                     if (hostMessage != null) {
                         AlertDialog(
@@ -155,6 +169,30 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        handleShortcutIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShortcutIntent(intent)
+    }
+
+    private fun handleShortcutIntent(source: Intent) {
+        val encoded = source.getStringExtra(GameShortcutManager.EXTRA_REQUEST) ?: return
+        source.removeExtra(GameShortcutManager.EXTRA_REQUEST)
+        shortcutJob?.cancel()
+        shortcutJob = lifecycleScope.launch {
+            shortcutLaunching = true
+            try {
+                val request = GameShortcutManager.decodeRequest(encoded)
+                val resolved = GameShortcutManager.resolve(applicationContext, request, appState.httpClient)
+                appState.addOrUpdateHost(resolved.host)
+                launchStream(resolved.host, resolved.app, resolved.settings, shortcutMode = true)
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                appState.hostActionMessage.value = "Could not open shortcut: ${e.message}"
+            } finally { shortcutLaunching = false }
+        }
     }
 
     override fun onResume() {
@@ -163,11 +201,12 @@ class MainActivity : ComponentActivity() {
         appState.refreshHosts()
     }
 
-    private fun launchStream(host: Host, app: StreamApp) {
-        val effectiveSettings = appState.getEffectiveSettingsForApp(host, app)
+    private fun launchStream(host: Host, app: StreamApp, settingsOverride: StreamSettings? = null, shortcutMode: Boolean = false) {
+        val effectiveSettings = settingsOverride ?: appState.getEffectiveSettingsForApp(host, app)
         val json = Json { ignoreUnknownKeys = true }
 
         val intent = Intent(this, StreamActivity::class.java).apply {
+            putExtra("EXTRA_SHORTCUT_MODE", shortcutMode)
             putExtra("EXTRA_HOST", json.encodeToString(host))
             putExtra("EXTRA_APP", json.encodeToString(app))
             putExtra("EXTRA_SETTINGS", json.encodeToString(effectiveSettings))
