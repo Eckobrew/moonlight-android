@@ -134,29 +134,16 @@ class SunshineHTTPClient(
         }
     }
 
-    private val remoteProbeTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val remoteDiscovery = RemoteAddressDiscovery()
 
-    suspend fun fetchServerInfo(host: Host): Pair<Host, Map<String, String>> {
+    suspend fun fetchServerInfo(host: Host, discoverRemote: Boolean = false, forceRemoteVerification: Boolean = false): Pair<Host, Map<String, String>> {
         val (resolved, metadata) = HostRouteResolver.resolve(host) { fetchServerInfoAtAddress(it) }
-        val reported = metadata["ExternalIP"]?.trim()?.takeIf { it.isNotEmpty() && it != resolved.address && it != "0.0.0.0" }
-        val port = metadata["ExternalPort"]?.toIntOrNull()?.takeIf { it in 6..65535 }
-        if (resolved.isSecurelyPaired && !resolved.serverId.isNullOrBlank() && reported != null && port != null &&
-            resolved.effectiveAddress == resolved.address && resolved.remoteAddress != reported) {
-            val now = System.currentTimeMillis()
-            val key = "${resolved.id}:$reported:$port"
-            if (now - (remoteProbeTimes[key] ?: 0L) > 60_000) {
-                remoteProbeTimes[key] = now
-                try {
-                    val verified = verifyRemoteAddress(resolved, reported, port, port - 5)
-                    return verified.copy(activeAddress = resolved.activeAddress) to metadata
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    AppLogger.debug("Reported remote endpoint could not be verified: ${e.message}", "HTTP")
-                }
-            }
+        if (!discoverRemote || resolved.effectiveAddress != resolved.address) return resolved to metadata
+        val updated = remoteDiscovery.update(resolved, metadata["ExternalIP"], metadata["ExternalPort"]?.toIntOrNull(), forceRemoteVerification) { address, httpPort, httpsPort ->
+            verifyRemoteAddress(resolved, address, httpPort, httpsPort)
+            true
         }
-        return resolved to metadata
+        return updated to metadata
     }
 
     suspend fun verifyRemoteAddress(host: Host, address: String, httpPort: Int, httpsPort: Int): Host {
@@ -167,7 +154,8 @@ class SunshineHTTPClient(
         val candidate = host.copy(remoteAddress = address.trim(), remoteHTTPPort = httpPort,
             remoteHTTPSPort = httpsPort, activeAddress = address.trim())
         fetchServerInfoAtAddress(candidate) // Verifies pinned certificate AND server identity.
-        return candidate.copy(activeAddress = host.activeAddress)
+        return candidate.copy(activeAddress = host.activeAddress, remoteAddressCandidate = address.trim(),
+            remoteAddressVerification = "Verified: certificate and server ID match.")
     }
 
     private suspend fun fetchServerInfoAtAddress(host: Host): Pair<Host, Map<String, String>> = withContext(Dispatchers.IO) {

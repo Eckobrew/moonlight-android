@@ -96,7 +96,7 @@ class AppState(context: Context) : ViewModel() {
             try {
                 for (host in _hosts.value.toList()) {
                     val refreshed = try {
-                        httpClient.fetchServerInfo(host).first
+                        httpClient.fetchServerInfo(host, discoverRemote = true).first
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -178,13 +178,26 @@ class AppState(context: Context) : ViewModel() {
         }
     }
 
+    fun discoverRemoteAddress(host: Host) {
+        viewModelScope.launch {
+            try {
+                val updated = httpClient.fetchServerInfo(host, discoverRemote = true, forceRemoteVerification = true).first
+                if (_hosts.value.any { it.id == host.id }) addOrUpdateHost(updated)
+            } catch (e: Exception) {
+                hostActionMessage.value = "Remote address discovery failed: ${e.message}"
+            }
+        }
+    }
+
     fun saveRemoteAddress(host: Host, address: String, httpPort: Int, httpsPort: Int) {
         viewModelScope.launch {
             try {
                 val verified = httpClient.verifyRemoteAddress(host, address, httpPort, httpsPort)
                 val latest = _hosts.value.find { it.id == host.id } ?: return@launch
                 addOrUpdateHost(latest.copy(remoteAddress = verified.remoteAddress,
-                    remoteHTTPPort = verified.remoteHTTPPort, remoteHTTPSPort = verified.remoteHTTPSPort))
+                    remoteHTTPPort = verified.remoteHTTPPort, remoteHTTPSPort = verified.remoteHTTPSPort,
+                    remoteAddressCandidate = verified.remoteAddressCandidate,
+                    remoteAddressVerification = verified.remoteAddressVerification))
                 hostActionMessage.value = "Remote address verified and saved."
             } catch (e: Exception) {
                 hostActionMessage.value = "Could not verify remote address: ${e.message}"

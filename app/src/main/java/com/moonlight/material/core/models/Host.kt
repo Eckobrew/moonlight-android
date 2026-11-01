@@ -19,6 +19,8 @@ data class Host(
     val name: String,
     val address: String,
     val remoteAddress: String? = null,
+    val remoteAddressCandidate: String? = null,
+    val remoteAddressVerification: String? = null,
     val activeAddress: String? = null,
     val httpsPort: Int = 47984,
     val httpPort: Int = 47989,
