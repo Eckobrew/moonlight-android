@@ -80,6 +80,9 @@ class StreamSessionController(
     private val _hostControlMessage = MutableStateFlow<String?>(null)
     val hostControlMessage: StateFlow<String?> = _hostControlMessage.asStateFlow()
 
+    private val _bitrateRequestInProgress = MutableStateFlow(false)
+    val bitrateRequestInProgress: StateFlow<Boolean> = _bitrateRequestInProgress.asStateFlow()
+
     private val _showSessionControls = MutableStateFlow(false)
     val showSessionControls: StateFlow<Boolean> = _showSessionControls.asStateFlow()
 
@@ -533,9 +536,79 @@ class StreamSessionController(
 
     fun applyRuntimeBitrate(mbps: Double) {
         if (mbps <= 0.0) return
+        val host = activeHost ?: return
         val kbps = (mbps * 1000).toInt()
-        _runtimeBitrateKbps.value = kbps
-        _hostControlMessage.value = "Bitrate set to ${mbps} Mbps"
+        val gen = sessionGeneration
+        scope.launch(Dispatchers.IO) {
+            _bitrateRequestInProgress.value = true
+            try {
+                if (_runtimeBitrateSupported.value) {
+                    val applied = httpClient.setRuntimeBitrate(host, kbps)
+                    if (sessionGeneration == gen) {
+                        _runtimeBitrateKbps.value = applied
+                        _hostControlMessage.value = "Bitrate updated to ${String.format("%.1f", applied / 1000.0)} Mbps."
+                    }
+                } else {
+                    if (sessionGeneration == gen) {
+                        _runtimeBitrateKbps.value = kbps
+                        _hostControlMessage.value = "Bitrate set to $mbps Mbps."
+                    }
+                }
+            } catch (e: Exception) {
+                if (sessionGeneration == gen) {
+                    _hostControlMessage.value = e.message ?: "Failed to set bitrate"
+                }
+            } finally {
+                _bitrateRequestInProgress.value = false
+            }
+        }
+    }
+
+    fun runServerCommand(index: Int, name: String) {
+        val host = activeHost ?: return
+        if (!_isStreaming.value || _currentStageName.value != "Connected" || host.capabilities?.canRunCommands != true) return
+        val gen = sessionGeneration
+        scope.launch(Dispatchers.IO) {
+            try {
+                val (updated, _) = httpClient.fetchServerInfo(host)
+                if (sessionGeneration != gen || updated.capabilities?.canRunCommands != true) {
+                    if (sessionGeneration == gen) _hostControlMessage.value = "Host commands changed. Reconnect before choosing a command again."
+                    return@launch
+                }
+                val commands = updated.capabilities.commands
+                if (index !in commands.indices || commands[index] != name) {
+                    if (sessionGeneration == gen) _hostControlMessage.value = "Host commands changed. Reconnect before choosing a command again."
+                    return@launch
+                }
+                val queued = MoonBridge.sendHostCommand(index.toByte())
+                if (sessionGeneration == gen) {
+                    _hostControlMessage.value = if (queued == 0) "Command submitted to host: $name" else "The command could not be queued."
+                }
+            } catch (e: Exception) {
+                if (sessionGeneration == gen) _hostControlMessage.value = e.message ?: "Failed to send command"
+            }
+        }
+    }
+
+    fun disconnectRemoteMonitor() {
+        val host = activeHost ?: return
+        if (!isRemoteMonitorSession || _currentStageName.value != "Connected") return
+        val gen = sessionGeneration
+        scope.launch(Dispatchers.IO) {
+            try {
+                val catalogue = httpClient.fetchAppList(host)
+                val action = catalogue.firstOrNull { it.control == com.moonlight.material.core.models.AppControl.DISCONNECT_MONITOR } ?: return@launch
+                stopSession()
+                val result = httpClient.performHostAction(host, action)
+                if (sessionGeneration == gen) {
+                    _hostControlMessage.value = result
+                }
+            } catch (e: Exception) {
+                if (sessionGeneration == gen) {
+                    _hostControlMessage.value = e.message ?: "Failed to disconnect monitor"
+                }
+            }
+        }
     }
 
     // --- MoonBridge.ConnectionListener ---

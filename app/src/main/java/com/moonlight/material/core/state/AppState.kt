@@ -175,32 +175,34 @@ class AppState(context: Context) : ViewModel() {
     }
 
     fun wakeHost(host: Host) {
-        val mac = host.macAddress
-        if (mac.isNullOrEmpty()) {
-            hostActionMessage.value = "Cannot send Wake-on-LAN: MAC address unknown."
-            return
-        }
-
         viewModelScope.launch {
-            addOrUpdateHost(host.copy(status = HostStatus.WAKING))
-            WakeOnLAN.wake(mac)
-
-            // Poll for up to 45 seconds for host to wake up
-            for (i in 0 until 15) {
-                delay(3000)
-                try {
-                    val (refreshed, _) = httpClient.fetchServerInfo(host)
-                    if (refreshed.status == HostStatus.ONLINE || refreshed.status == HostStatus.STREAMING) {
-                        addOrUpdateHost(refreshed)
-                        hostActionMessage.value = "${refreshed.name} is now awake and ready!"
-                        return@launch
-                    }
-                } catch (e: Exception) {
-                    // Still waking
-                }
+            try {
+                val resolved = com.moonlight.material.networking.HostWakeConnection.resolve(
+                    host = host,
+                    probe = { httpClient.fetchServerInfo(it).first },
+                    onWaking = { addOrUpdateHost(host.copy(status = HostStatus.WAKING)) }
+                )
+                addOrUpdateHost(resolved)
+                hostActionMessage.value = "${resolved.name} is now awake and ready!"
+            } catch (e: com.moonlight.material.networking.HostWakeFailure) {
+                addOrUpdateHost(host.copy(status = HostStatus.OFFLINE))
+                hostActionMessage.value = e.message ?: "Wake-on-LAN failed."
+            } catch (e: Exception) {
+                addOrUpdateHost(host.copy(status = HostStatus.OFFLINE))
+                hostActionMessage.value = e.message ?: "Failed to wake host."
             }
-            addOrUpdateHost(host.copy(status = HostStatus.OFFLINE))
-            hostActionMessage.value = "Host did not wake up within 45 seconds."
+        }
+    }
+
+    fun sleepHost(host: Host) {
+        viewModelScope.launch {
+            try {
+                httpClient.sleepHost(host)
+                hostActionMessage.value = "The host accepted the sleep request. Completion depends on Windows."
+                addOrUpdateHost(host.copy(status = HostStatus.OFFLINE))
+            } catch (e: Exception) {
+                hostActionMessage.value = "${e.message} No automatic retry was made."
+            }
         }
     }
 

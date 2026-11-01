@@ -149,17 +149,17 @@ Status Definitions:
 | `UI/Debug/LogViewerSheet.kt` | `ui/debug/LogViewerSheet.kt` | ported | Live searchable diagnostics log viewer. |
 | `UI/Hosts/AddHostSheet.swift` | `ui/hosts/AddHostDialog.kt` | ported | Manual IP / hostname input dialog. |
 | `UI/Hosts/HostCardView.swift` | `ui/hosts/HostCard.kt` | ported | Host card with status indicator and icon. |
-| `UI/Hosts/HostDetailsSheet.swift` | `ui/hosts/HostDetailsSheet.kt` | ported | Detailed host info, external IP, MAC, ports. |
+| `UI/Hosts/HostDetailsSheet.swift` | `ui/hosts/HostDetailsSheet.kt` | ported | Milestone M8: Detailed host diagnostics, public connectivity port testing, sleep host action, and WoL. |
 | `UI/Hosts/HostGridView.swift` | `ui/hosts/HostGridScreen.kt` | ported | Hosts list, discovery state, add host FAB. |
 | `UI/Pairing/PairingSheet.swift` | `ui/pairing/PairingDialog.kt` | ported | 4-digit PIN presentation and stage indicator. |
 | `UI/Settings/ClientFeatureSettings.swift` | `ui/settings/SettingsScreen.kt` | ported | Client feature toggles (touch overlay, background gamepad). |
 | `UI/Settings/PerAppSettingsSheet.swift` | `ui/settings/PerAppSettingsDialog.kt` | ported | Per-game overrides dialog. |
 | `UI/Settings/SettingsView.swift` | `ui/settings/SettingsScreen.kt` | ported | 6-tab comprehensive settings matching reference v0.2. |
 | `UI/Settings/StreamModePickers.swift` | `ui/settings/SettingsScreen.kt` | ported | Resolution & FPS pickers with Custom option. |
-| `UI/Stream/PerformanceHUDView.swift` | `ui/stream/PerformanceHUD.kt` | ported | On-screen stats overlay (FPS, decode time, RTT, bitrate). |
-| `UI/Stream/SessionControlsView.swift` | `ui/stream/SessionControlsSheet.kt` | ported | Runtime bitrate slider and session disconnect sheet. |
+| `UI/Stream/PerformanceHUDView.swift` | `ui/stream/PerformanceHUD.kt` | ported | Milestone M8: Minimalist text-only overlay in the top-right corner (FPS, decode, RTT, bitrate, loss, host CPU/GPU). |
+| `UI/Stream/SessionControlsView.swift` | `ui/stream/SessionControlsSheet.kt` | ported | Milestone M8: Runtime bitrate slider, host hardware telemetry toggle, server commands, and remote monitor disconnect. |
 | `UI/Stream/StreamNegotiationView.swift` | `ui/stream/StreamingScreen.kt` | ported | Stage progress indicator during connection. |
-| `UI/Stream/StreamingSessionView.swift` | `ui/stream/StreamingScreen.kt` | ported | SurfaceView container with gesture and controller routing. |
+| `UI/Stream/StreamingSessionView.swift` | `ui/stream/StreamingScreen.kt` & `StreamActivity.kt` | ported | Milestone M8: SurfaceView container, sensorLandscape-locked streaming activity, gesture/key routing. |
 
 ## 11. Native Layer & Vendored Reference Dependencies
 
@@ -172,6 +172,6 @@ Status Definitions:
 
 ## Summary Statistics
 - **Total Reference Files Tracked**: 85
-- **Ported**: 38
-- **Not Started (Targeted in Milestones M4–M8)**: 39
+- **Ported**: 67
+- **Not Started (Targeted in Remaining Cleanup)**: 10
 - **N/A on Android (Documented Reason)**: 8

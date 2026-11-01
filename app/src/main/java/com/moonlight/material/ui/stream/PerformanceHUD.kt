@@ -1,103 +1,78 @@
 package com.moonlight.material.ui.stream
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Divider
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.moonlight.material.core.models.HostHardwareMetrics
 import com.moonlight.material.core.models.PerformanceMetrics
-import com.moonlight.material.ui.theme.*
 
+/**
+ * Minimalist, high-legibility text-only performance metrics HUD
+ * anchored in the top-right corner of the streaming viewport.
+ */
 @Composable
 fun PerformanceHUD(
     metrics: PerformanceMetrics,
+    hostStatistics: HostHardwareMetrics? = null,
     modifier: Modifier = Modifier
 ) {
-    val statusColor = if (metrics.packetLossPercentage > 1.0) RoseError else if (metrics.packetLossPercentage > 0.3) AmberWarning else EmeraldGreen
+    val textStyle = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = Color(0xFFEEEEEE),
+        shadow = Shadow(
+            color = Color.Black.copy(alpha = 0.9f),
+            offset = Offset(1.5f, 1.5f),
+            blurRadius = 3f
+        )
+    )
 
-    Box(
-        modifier = modifier
-            .width(260.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(MidnightBlue.copy(alpha = 0.85f))
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(14.dp))
-            .padding(12.dp)
+    val warningColor = Color(0xFFFFB74D) // Amber/orange warning
+    val warningStyle = textStyle.copy(color = warningColor)
+
+    Column(
+        modifier = modifier.padding(top = 8.dp, end = 12.dp),
+        horizontalAlignment = Alignment.End
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            // Header
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(statusColor)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "PERFORMANCE HUD",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
-                        fontSize = 10.sp
-                    )
-                }
+        // Stream metrics
+        Text(
+            text = "${String.format("%.1f", metrics.currentFps)} FPS (${metrics.targetFps}) · ${metrics.resolution} · ${metrics.currentCodec}",
+            style = textStyle
+        )
+        Text(
+            text = "Decode: ${String.format("%.2f", metrics.decodeTimeMs)} ms · RTT: ${String.format("%.1f", metrics.roundTripTimeMs)} ms (±${String.format("%.1f", metrics.roundTripTimeVarianceMs)})",
+            style = textStyle
+        )
+        Text(
+            text = "Bitrate: ${String.format("%.1f", metrics.bitrateMbps)} Mbps · Loss: ${String.format("%.1f", metrics.packetLossPercentage)}% (${metrics.networkDroppedFrames})",
+            style = if (metrics.packetLossPercentage > 0.5) warningStyle else textStyle
+        )
+
+        // Host hardware metrics (if active and available)
+        if (hostStatistics != null) {
+            val cpuText = hostStatistics.cpu.cpu_usage_percent?.let { "Host CPU: ${String.format("%.1f", it)}%" }
+            val gpu = hostStatistics.gpus.firstOrNull()
+            val gpuText = gpu?.let { g ->
+                val usage = g.metrics["gpu_usage_percent"]?.let { "GPU: ${String.format("%.1f", it)}%" }
+                val temp = g.metrics["gpu_temperature_c"]?.let { " · ${String.format("%.0f", it)}°C" } ?: ""
+                if (usage != null) "$usage$temp" else null
             }
-
-            Divider(color = Color.White.copy(alpha = 0.15f), modifier = Modifier.padding(vertical = 4.dp))
-
-            MetricRow("FPS", String.format("%.1f / %d", metrics.currentFps, metrics.targetFps))
-            MetricRow("Decode Time", String.format("%.2f ms", metrics.decodeTimeMs))
-            MetricRow("RTT Latency", String.format("%.1f ms", metrics.roundTripTimeMs))
-            MetricRow("RTT Variation", String.format("%.1f ms", metrics.roundTripTimeVarianceMs))
-            MetricRow("Bitrate target", String.format("%.1f Mbps", metrics.bitrateMbps))
-            MetricRow(
-                "Packet Loss",
-                String.format("%.1f%% (%d)", metrics.packetLossPercentage, metrics.networkDroppedFrames),
-                isWarning = metrics.packetLossPercentage > 0.5
-            )
-            MetricRow("Codec", metrics.currentCodec)
-            MetricRow("Resolution", metrics.resolution)
-            MetricRow("V-Sync", if (metrics.vsyncEnabled) "On" else "Off")
-            MetricRow("Pacing", if (metrics.pacingEnabled) "On" else "Off")
+            val hostLine = listOfNotNull(cpuText, gpuText).joinToString(" · ")
+            if (hostLine.isNotEmpty()) {
+                Text(text = hostLine, style = textStyle)
+            }
         }
-    }
-}
-
-@Composable
-private fun MetricRow(label: String, value: String, isWarning: Boolean = false) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = label,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            color = TextSecondary
-        )
-        Text(
-            text = value,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (isWarning) AmberWarning else TextPrimary
-        )
     }
 }

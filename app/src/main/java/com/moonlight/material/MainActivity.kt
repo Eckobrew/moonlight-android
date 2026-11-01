@@ -89,6 +89,10 @@ class MainActivity : ComponentActivity() {
                             onWakeOnLan = {
                                 appState.wakeHost(hostDetailsToShow!!)
                                 appState.hostDetailsToShow.value = null
+                            },
+                            onSleep = {
+                                appState.sleepHost(hostDetailsToShow!!)
+                                appState.hostDetailsToShow.value = null
                             }
                         )
                     }

@@ -69,12 +69,11 @@ fun StreamingScreen(
                         }
                     }
 
-                    setOnKeyListener { _, keyCode, event ->
+                    setOnKeyListener { _, _, event ->
                         if (session.gamepadHandler.handleKeyEvent(event)) {
                             true
                         } else {
-                            session.sendKeyboardEvent(keyCode.toShort(), event.action == android.view.KeyEvent.ACTION_DOWN)
-                            true
+                            session.handleKeyEvent(event)
                         }
                     }
                 }
@@ -108,8 +107,10 @@ fun StreamingScreen(
 
         // Performance HUD overlay
         if (showHUD && stageName == "Connected") {
+            val hostStats by session.hostStatistics.collectAsState()
             PerformanceHUD(
                 metrics = metrics,
+                hostStatistics = hostStats,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(16.dp)

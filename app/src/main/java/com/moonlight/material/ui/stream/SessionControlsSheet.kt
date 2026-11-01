@@ -1,9 +1,13 @@
 package com.moonlight.material.ui.stream
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Monitor
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,7 +25,13 @@ fun SessionControlsSheet(
 ) {
     val currentKbps by session.runtimeBitrateKbps.collectAsState()
     var bitrateMbps by remember { mutableStateOf((currentKbps / 1000.0).coerceAtLeast(1.0)) }
+    val isApplyingBitrate by session.bitrateRequestInProgress.collectAsState()
     val showHUD by session.showPerformanceOverlay.collectAsState()
+    val showHostStats by session.showHostStatistics.collectAsState()
+    val hostControlMessage by session.hostControlMessage.collectAsState()
+    val activeHost = session.activeHost
+
+    var commandsMenuExpanded by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -32,6 +42,7 @@ fun SessionControlsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(24.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Text(
                 text = "Session Controls",
@@ -60,14 +71,20 @@ fun SessionControlsSheet(
                         value = bitrateMbps.toFloat(),
                         onValueChange = { bitrateMbps = it.toDouble() },
                         valueRange = 1f..150f,
+                        enabled = !isApplyingBitrate,
                         colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
                     )
                     Button(
                         onClick = { session.applyRuntimeBitrate(bitrateMbps) },
+                        enabled = !isApplyingBitrate,
                         colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text("Apply", color = DeepNavy, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = if (isApplyingBitrate) "Applying…" else "Apply",
+                            color = DeepNavy,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -85,6 +102,89 @@ fun SessionControlsSheet(
                     checked = showHUD,
                     onCheckedChange = { session.togglePerformanceOverlay() },
                     colors = SwitchDefaults.colors(checkedThumbColor = DeepNavy, checkedTrackColor = CyanAccent)
+                )
+            }
+
+            // Include Host Statistics toggle (if supported)
+            if (activeHost?.capabilities?.hardwareMetricsVersion == 1) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Include Host Statistics", color = TextPrimary)
+                        Text(
+                            "Samples CPU/GPU telemetry while HUD is visible.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Switch(
+                        checked = showHostStats,
+                        onCheckedChange = { session.toggleHostStatistics() },
+                        colors = SwitchDefaults.colors(checkedThumbColor = DeepNavy, checkedTrackColor = CyanAccent)
+                    )
+                }
+            }
+
+            // Server Commands (if supported)
+            val commands = activeHost?.capabilities?.commands.orEmpty()
+            if (activeHost?.capabilities?.canRunCommands == true && commands.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { commandsMenuExpanded = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
+                    ) {
+                        Icon(Icons.Default.Terminal, null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Server Commands (${commands.size})")
+                    }
+                    DropdownMenu(
+                        expanded = commandsMenuExpanded,
+                        onDismissRequest = { commandsMenuExpanded = false },
+                        containerColor = MidnightBlue
+                    ) {
+                        commands.forEachIndexed { index, name ->
+                            DropdownMenuItem(
+                                text = { Text(name, color = TextPrimary) },
+                                onClick = {
+                                    commandsMenuExpanded = false
+                                    session.runServerCommand(index, name)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Release Remote Monitor button
+            if (session.isRemoteMonitorSession) {
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = {
+                        session.disconnectRemoteMonitor()
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AmberWarning)
+                ) {
+                    Icon(Icons.Default.Monitor, null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Release Remote Monitor")
+                }
+            }
+
+            // Feedback Message
+            if (!hostControlMessage.isNullOrEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = hostControlMessage ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CyanGlow
                 )
             }
 

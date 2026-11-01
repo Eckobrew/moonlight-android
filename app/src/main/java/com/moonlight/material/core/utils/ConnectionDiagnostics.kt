@@ -13,6 +13,15 @@ object ConnectionDiagnostics {
     const val ML_ERROR_PROTECTED_CONTENT = -103
     const val ML_ERROR_FRAME_CONVERSION = -104
 
+    fun ports(flags: Int): String {
+        if (flags == 0) return ""
+        return try {
+            com.moonlight.material.bridge.MoonBridge.stringifyPortFlags(flags, ", ")
+        } catch (_: Throwable) {
+            "Port flags: 0x${Integer.toHexString(flags)}"
+        }
+    }
+
     fun stageFailure(stage: Int, code: Int, stageName: String? = null, portFlagsString: String? = null): String {
         val name = stageName ?: "Connection (stage $stage)"
         val ports = portFlagsString ?: ""
