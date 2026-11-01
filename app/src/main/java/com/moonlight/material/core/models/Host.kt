@@ -14,15 +14,6 @@ enum class HostStatus {
 }
 
 @Serializable
-data class HostCapabilities(
-    val virtualDisplayCapable: Boolean = false,
-    val canRunCommands: Boolean = false,
-    val commands: List<String> = emptyList(),
-    val hardwareMetricsVersion: Int = 0,
-    val permission: String? = null
-)
-
-@Serializable
 data class Host(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -49,6 +40,9 @@ data class Host(
 ) {
     val isSecurelyPaired: Boolean
         get() = isPaired && !serverCertificateDER.isNullOrEmpty()
+
+    val isOnline: Boolean
+        get() = status == HostStatus.ONLINE || status == HostStatus.STREAMING
 
     val needsCertificatePairing: Boolean
         get() = isPaired && serverCertificateDER.isNullOrEmpty()

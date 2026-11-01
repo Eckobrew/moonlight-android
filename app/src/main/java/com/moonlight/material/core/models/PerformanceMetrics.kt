@@ -3,24 +3,6 @@ package com.moonlight.material.core.models
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class GpuMetrics(
-    val id: String = "",
-    val name: String = "",
-    val metrics: Map<String, Double> = emptyMap()
-)
-
-@Serializable
-data class CpuMetrics(
-    val cpu_usage_percent: Double = 0.0
-)
-
-@Serializable
-data class HostHardwareMetrics(
-    val cpu: CpuMetrics = CpuMetrics(),
-    val gpus: List<GpuMetrics> = emptyList()
-)
-
-@Serializable
 data class PerformanceMetrics(
     val currentFps: Double = 0.0,
     val targetFps: Int = 60,

@@ -3,17 +3,27 @@ package com.moonlight.material.networking
 import java.util.Base64
 import com.moonlight.material.core.models.Host
 import com.moonlight.material.core.models.HostCapabilities
+import com.moonlight.material.core.models.HostHardwareMetrics
 import com.moonlight.material.core.models.HostStatus
+import com.moonlight.material.core.models.HostXMLValues
 import com.moonlight.material.core.models.StreamApp
 import com.moonlight.material.core.models.StreamSettings
 import com.moonlight.material.core.security.CertificateManager
+import com.moonlight.material.core.security.CryptoUtils
 import com.moonlight.material.core.security.HostTrust
 import com.moonlight.material.core.security.HostTrustException
 import com.moonlight.material.core.utils.AppLogger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import org.w3c.dom.Element
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
@@ -24,7 +34,9 @@ import java.util.concurrent.TimeUnit
 import javax.xml.parsers.DocumentBuilderFactory
 
 class SunshineHTTPClient(
-    private val certificateManager: CertificateManager
+    private val certificateManager: CertificateManager? = null,
+    val uniqueID: () -> String = { certificateManager?.uniqueId ?: "fixture" },
+    var extensionTransport: (suspend (Request, Host) -> Pair<ByteArray, Int>)? = null
 ) {
     // Unpinned plain HTTP client - strictly for unpinned HTTP calls (pairing stages 1-4, http serverinfo, unpair)
     // Refuses all HTTP and SSL redirects (HostTrust.swift:117-123)
@@ -58,10 +70,11 @@ class SunshineHTTPClient(
         if (certDerBase64.isNullOrEmpty()) {
             throw HostTrustException("HTTPS connection rejected: Host ${host.name} has no pinned certificate (fail closed).")
         }
+        val certMgr = certificateManager ?: throw HostTrustException("CertificateManager required for HTTPS connections.")
 
         return pinnedClients.getOrPut(certDerBase64) {
             val der = Base64.getDecoder().decode(certDerBase64)
-            val (sslSocketFactory, trustManager) = HostTrust.createPinnedSSLSocketFactory(der, certificateManager)
+            val (sslSocketFactory, trustManager) = HostTrust.createPinnedSSLSocketFactory(der, certMgr)
             OkHttpClient.Builder()
                 .connectTimeout(5, TimeUnit.SECONDS)
                 .readTimeout(10, TimeUnit.SECONDS)
@@ -86,7 +99,8 @@ class SunshineHTTPClient(
         usePairingSession: Boolean = false
     ): Pair<Int, Map<String, String>> = withContext(Dispatchers.IO) {
         val client = if (certificateDER != null) {
-            val (sslSocketFactory, trustManager) = HostTrust.createPinnedSSLSocketFactory(certificateDER, certificateManager)
+            val certMgr = certificateManager ?: throw HostTrustException("CertificateManager required for HTTPS connections.")
+            val (sslSocketFactory, trustManager) = HostTrust.createPinnedSSLSocketFactory(certificateDER, certMgr)
             OkHttpClient.Builder()
                 .connectTimeout(timeoutSec, TimeUnit.SECONDS)
                 .readTimeout(timeoutSec, TimeUnit.SECONDS)
@@ -111,7 +125,7 @@ class SunshineHTTPClient(
     }
 
     suspend fun fetchServerInfo(host: Host): Pair<Host, Map<String, String>> = withContext(Dispatchers.IO) {
-        val uniqueId = certificateManager.uniqueId
+        val uniqueId = uniqueID()
         var responseData: String? = null
         var isHttps = false
 
@@ -157,7 +171,7 @@ class SunshineHTTPClient(
             else -> HostStatus.PAIRING_REQUIRED
         }
 
-        val updatedCapabilities = parseCapabilities(dict)
+        val updatedCapabilities = HostCapabilities.parse(dict, HostXMLValues.elements("ServerCommand", responseData!!))
 
         val updatedHost = host.copy(
             name = dict["hostname"] ?: host.name,
@@ -175,22 +189,8 @@ class SunshineHTTPClient(
         Pair(updatedHost, dict)
     }
 
-    private fun parseCapabilities(dict: Map<String, String>): HostCapabilities {
-        val permission = dict["Permission"]
-        val canRunCommands = !permission.isNullOrEmpty() && permission != "0"
-        val virtualDisplaySupported = dict["VirtualDisplay"] == "1" || dict["VirtualDisplaySupported"] == "1"
-
-        return HostCapabilities(
-            permission = permission,
-            canRunCommands = canRunCommands,
-            commands = emptyList(),
-            hardwareMetricsVersion = dict["HardwareMetricsVersion"]?.toIntOrNull() ?: 0,
-            virtualDisplayCapable = virtualDisplaySupported
-        )
-    }
-
     suspend fun fetchAppList(host: Host): List<StreamApp> = withContext(Dispatchers.IO) {
-        val uniqueId = certificateManager.uniqueId
+        val uniqueId = uniqueID()
         val url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/applist?uniqueid=$uniqueId"
         val client = getClientForHost(host)
         val request = Request.Builder().url(url).build()
@@ -205,7 +205,7 @@ class SunshineHTTPClient(
     }
 
     suspend fun fetchBoxArt(host: Host, appId: Int, appUUID: String? = null): ByteArray = withContext(Dispatchers.IO) {
-        val uniqueId = certificateManager.uniqueId
+        val uniqueId = uniqueID()
         var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/appasset?uniqueid=$uniqueId&appid=$appId&AssetType=2&AssetIdx=0"
         if (!appUUID.isNullOrEmpty() && isValidUuid(appUUID)) {
             url += "&appuuid=$appUUID"
@@ -230,7 +230,7 @@ class SunshineHTTPClient(
         rikeyId: Int,
         commonCExtraParams: String = ""
     ): String? = withContext(Dispatchers.IO) {
-        val uniqueId = certificateManager.uniqueId
+        val uniqueId = uniqueID()
         val mode = "${settings.width}x${settings.height}x${settings.fps}"
         val surroundAudioInfo = settings.audioMode.surroundAudioInfo
         val localAudioPlayMode = if (settings.muteHostAudio) 0 else 1
@@ -254,7 +254,7 @@ class SunshineHTTPClient(
             url += extraParams
         }
 
-        AppLogger.info("Launching app $appId on ${host.name} ($mode)", "HTTP")
+        AppLogger.info("Launching $appId on ${host.name} ($mode)", "HTTP")
         val client = getClientForHost(host)
         val request = Request.Builder().url(url).build()
         client.newCall(request).execute().use { response ->
@@ -264,11 +264,8 @@ class SunshineHTTPClient(
             val dict = parseSimpleXml(response.body?.string() ?: "")
             val statusCode = dict["status_code"] ?: "200"
             if (statusCode != "200") {
-                val msg = dict["status_message"] ?: "Launch failed (code $statusCode)"
+                val msg = dict["status_message"] ?: "Launch failed"
                 throw IOException(msg)
-            }
-            if (dict["gamesession"] == "0") {
-                throw IOException("Host failed to launch game session")
             }
             dict["sessionUrl0"]
         }
@@ -281,11 +278,10 @@ class SunshineHTTPClient(
         rikeyId: Int,
         commonCExtraParams: String = ""
     ): String? = withContext(Dispatchers.IO) {
-        val uniqueId = certificateManager.uniqueId
+        val uniqueId = uniqueID()
         val mode = "${settings.width}x${settings.height}x${settings.fps}"
         val surroundAudioInfo = settings.audioMode.surroundAudioInfo
         val localAudioPlayMode = if (settings.muteHostAudio) 0 else 1
-        val sops = if (settings.optimizeGameSettings) "1" else "0"
         val extraParams = if (commonCExtraParams.isNotEmpty()) {
             commonCExtraParams
         } else {
@@ -296,7 +292,7 @@ class SunshineHTTPClient(
             }
         }
 
-        var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/resume?uniqueid=$uniqueId&mode=$mode&additionalStates=1&sops=$sops&rikey=$rikey&rikeyid=$rikeyId&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
+        var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/resume?uniqueid=$uniqueId&rikey=$rikey&rikeyid=$rikeyId&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
         url += buildLaunchQuery(settings, host)
         if (extraParams.isNotEmpty()) {
             url += extraParams
@@ -320,7 +316,7 @@ class SunshineHTTPClient(
     }
 
     suspend fun quitApp(host: Host): Boolean = withContext(Dispatchers.IO) {
-        val uniqueId = certificateManager.uniqueId
+        val uniqueId = uniqueID()
         val url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/cancel?uniqueid=$uniqueId"
         val client = getClientForHost(host)
         val request = Request.Builder().url(url).build()
@@ -334,7 +330,7 @@ class SunshineHTTPClient(
     }
 
     suspend fun unpair(host: Host): Boolean = withContext(Dispatchers.IO) {
-        val uniqueId = certificateManager.uniqueId
+        val uniqueId = uniqueID()
         val url = "http://${host.urlAddress}:${host.effectiveHTTPPort}/unpair?uniqueid=$uniqueId"
         try {
             baseHttpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
@@ -343,6 +339,174 @@ class SunshineHTTPClient(
         } catch (e: Exception) {
             false
         }
+    }
+
+    /**
+     * Executes extension request with certificate verification.
+     * Matches HostControlClient.swift & SunshineHTTPClient.swift:477-491
+     */
+    suspend fun extensionRequest(
+        host: Host,
+        path: String,
+        query: List<Pair<String, String>> = emptyList(),
+        method: String = "GET"
+    ): Pair<ByteArray, Int> = withContext(Dispatchers.IO) {
+        if (!host.isSecurelyPaired) {
+            throw HostTrustException("Host is not securely paired.")
+        }
+        val builder = StringBuilder("https://${host.urlAddress}:${host.effectiveHTTPSPort}$path")
+        val params = mutableListOf<Pair<String, String>>()
+        if (!path.startsWith("/power-actions/")) {
+            params.add("uniqueid" to uniqueID())
+        }
+        params.addAll(query)
+        if (params.isNotEmpty()) {
+            builder.append("?")
+            builder.append(params.joinToString("&") { (k, v) ->
+                "${java.net.URLEncoder.encode(k, "UTF-8")}=${java.net.URLEncoder.encode(v, "UTF-8")}"
+            })
+        }
+        val url = builder.toString()
+        val requestBuilder = Request.Builder().url(url)
+        if (method == "POST") {
+            requestBuilder.post(RequestBody.create(null, ByteArray(0)))
+        } else {
+            requestBuilder.get()
+        }
+        val request = requestBuilder.build()
+
+        extensionTransport?.let { transport ->
+            return@withContext transport(request, host)
+        }
+
+        val client = getClientForHost(host)
+        client.newCall(request).execute().use { response ->
+            val bytes = response.body?.bytes() ?: ByteArray(0)
+            Pair(bytes, response.code)
+        }
+    }
+
+    /**
+     * Verifies that HTTP status code and XML status_code (if present) are in 200..299.
+     * Matches HostControlClient.swift:10-17
+     */
+    fun checkExtension(data: ByteArray, httpStatusCode: Int): Map<String, String> {
+        val xml = parseSimpleXml(String(data, Charsets.UTF_8))
+        val status = xml["status_code"]?.toIntOrNull() ?: httpStatusCode
+        if (httpStatusCode !in 200..299 || status !in 200..299) {
+            throw HostControlError(status, xml["status_message"] ?: "Host request failed ($status).")
+        }
+        return xml
+    }
+
+    /**
+     * Checks if host supports runtime bitrate modification.
+     * Matches HostControlClient.swift:19-24
+     */
+    suspend fun supportsRuntimeBitrate(host: Host): Boolean {
+        return try {
+            val (data, code) = extensionRequest(host, "/api/abr/capabilities")
+            if (code != 200) return false
+            val json = Json.parseToJsonElement(String(data, Charsets.UTF_8))
+            val features = json.jsonObject["features"]?.jsonArray
+            features?.any { it.jsonPrimitive.content == "runtime_bitrate" } == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Adjusts active stream bitrate at runtime.
+     * Matches HostControlClient.swift:26-32
+     */
+    suspend fun setRuntimeBitrate(host: Host, kbps: Int): Int {
+        if (kbps !in 1..500_000) {
+            throw HostControlError(400, "Bitrate must be between 1 and 500000 Kbps.")
+        }
+        val (data, code) = extensionRequest(host, "/bitrate", query = listOf("bitrate" to kbps.toString()))
+        val xml = checkExtension(data, code)
+        val applied = xml["bitrate"]?.toIntOrNull()
+        if (applied == null || applied !in 1..500_000) {
+            throw IOException("Bad server response")
+        }
+        return applied
+    }
+
+    /**
+     * Fetches real-time host hardware telemetry (CPU/GPU utilization).
+     * Matches HostControlClient.swift:34-42
+     */
+    suspend fun fetchHardwareMetrics(host: Host): HostHardwareMetrics {
+        val (data, code) = extensionRequest(host, "/api/hardware-metrics")
+        if (code != 200) {
+            throw HostControlError(code, "Host statistics unavailable ($code).")
+        }
+        val jsonStr = String(data, Charsets.UTF_8)
+        val json = Json { ignoreUnknownKeys = true }
+        val metrics = json.decodeFromString<HostHardwareMetrics>(jsonStr)
+        if (metrics.version != 1 || metrics.interval_ms <= 0) {
+            throw IOException("Bad server response")
+        }
+        return metrics
+    }
+
+    /**
+     * Initiates host sleep via two-stage handshake with single-use SleepToken.
+     * Matches HostControlClient.swift:45-64
+     */
+    suspend fun sleepHost(host: Host) {
+        val (data, code) = extensionRequest(host, "/power-actions/v1")
+        val xml = checkExtension(data, code)
+        val token = xml["SleepToken"]
+        if (xml["PowerActionVersion"] != "1" || xml["SleepSupported"] != "1" || xml["SleepAllowed"] != "1" || xml["SleepAvailable"] != "1" || token.isNullOrEmpty()) {
+            throw HostControlError(409, "The PC cannot sleep now. End all host sessions and check this device's sleep permission, then confirm again.")
+        }
+
+        currentCoroutineContext().ensureActive()
+        val (accepted, result) = try {
+            extensionRequest(host, "/power-actions/v1/sleep", query = listOf("token" to token), method = "POST")
+        } catch (e: HostControlError) {
+            throw e
+        } catch (e: Exception) {
+            throw HostControlError(-1, "The sleep request's outcome is unknown because its acknowledgement was not received. Confirm again before retrying.")
+        }
+        val confirmation = checkExtension(accepted, result)
+        if (result != 202 || confirmation["status_code"] != "202" || confirmation["SleepAccepted"] != "1") {
+            throw HostControlError(result, "Sleep outcome is unknown. Confirm again before retrying.")
+        }
+    }
+
+    /**
+     * Performs host control action (disconnect monitor, disconnect input, terminate stream).
+     * Deliberately completes with XML 410 rather than an RTSP URL.
+     * Matches HostControlClient.swift:67-90
+     */
+    suspend fun performHostAction(host: Host, app: StreamApp): String {
+        if (!app.isHostAction) {
+            throw IOException("Unsupported URL for host action")
+        }
+        val query = mutableListOf(
+            "appid" to app.id.toString(),
+            "rikey" to CryptoUtils.hexString(CryptoUtils.randomBytes(16)),
+            "rikeyid" to kotlin.random.Random.nextLong(1L, 0xFFFFFFFFL).toString(),
+            "localAudioPlayMode" to "0"
+        )
+        if (!app.uuid.isNullOrEmpty()) {
+            query.add("appuuid" to app.uuid)
+        }
+        val (data, code) = extensionRequest(host, "/launch", query = query)
+        val xml = parseSimpleXml(String(data, Charsets.UTF_8))
+        val expected = when (app.control) {
+            com.moonlight.material.core.models.AppControl.DISCONNECT_MONITOR -> "Remote Monitor disconnected successfully."
+            com.moonlight.material.core.models.AppControl.DISCONNECT_INPUT -> "Remote Input disconnected successfully."
+            com.moonlight.material.core.models.AppControl.TERMINATE -> "Active stream terminated. Remote Monitor and Remote Input remain connected."
+            else -> throw IOException("Unsupported URL for host action")
+        }
+        if (code != 200 || xml["status_code"] != "410" || xml["status_message"] != expected) {
+            val errCode = xml["status_code"]?.toIntOrNull() ?: code
+            throw HostControlError(errCode, xml["status_message"] ?: "Host action was not confirmed.")
+        }
+        return expected
     }
 
     companion object {
@@ -388,29 +552,62 @@ class SunshineHTTPClient(
                 val builder = factory.newDocumentBuilder()
                 val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
                 val root = doc.documentElement
-                parseElementRecursive(root, map)
+
+                fun extractAttributesAndElements(element: Element) {
+                    val attrs = element.attributes
+                    for (i in 0 until attrs.length) {
+                        val attr = attrs.item(i)
+                        if (!map.containsKey(attr.nodeName)) {
+                            map[attr.nodeName] = unescapeXml(attr.nodeValue)
+                        }
+                    }
+                    val childNodes = element.childNodes
+                    for (i in 0 until childNodes.length) {
+                        val child = childNodes.item(i)
+                        if (child.nodeType == Node.ELEMENT_NODE) {
+                            val childElem = child as Element
+                            var hasSubElement = false
+                            val subNodes = childElem.childNodes
+                            for (j in 0 until subNodes.length) {
+                                if (subNodes.item(j).nodeType == Node.ELEMENT_NODE) {
+                                    hasSubElement = true
+                                    break
+                                }
+                            }
+                            if (!hasSubElement) {
+                                map[childElem.tagName] = unescapeXml(childElem.textContent.trim())
+                            }
+                            extractAttributesAndElements(childElem)
+                        }
+                    }
+                }
+
+                extractAttributesAndElements(root)
             } catch (e: Exception) {
-                val pattern = Regex("<([a-zA-Z0-9_-]+)>([^<]*)</[a-zA-Z0-9_-]+>")
-                for (match in pattern.findAll(xml)) {
+                val innerTagRegex = Regex("<([a-zA-Z0-9_-]+)>([^<]*)</[a-zA-Z0-9_-]+>")
+                for (match in innerTagRegex.findAll(xml)) {
                     val key = match.groupValues[1]
-                    val value = match.groupValues[2]
+                    val value = unescapeXml(match.groupValues[2])
                     map[key] = value
+                }
+                val attributeRegex = Regex("([a-zA-Z0-9_-]+)=[\"']([^\"']*)[\"']")
+                for (match in attributeRegex.findAll(xml)) {
+                    val key = match.groupValues[1]
+                    val value = unescapeXml(match.groupValues[2])
+                    if (!map.containsKey(key)) {
+                        map[key] = value
+                    }
                 }
             }
             return map
         }
 
-        private fun parseElementRecursive(node: Node, map: MutableMap<String, String>) {
-            val childNodes = node.childNodes
-            for (i in 0 until childNodes.length) {
-                val child = childNodes.item(i)
-                if (child.nodeType == Node.ELEMENT_NODE) {
-                    val element = child as Element
-                    val text = element.textContent.trim()
-                    map[element.tagName] = text
-                    parseElementRecursive(child, map)
-                }
-            }
+        private fun unescapeXml(str: String): String {
+            return str.replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&")
         }
 
         fun parseAppListXml(xml: String, host: Host): List<StreamApp> {
@@ -420,19 +617,35 @@ class SunshineHTTPClient(
                 val builder = factory.newDocumentBuilder()
                 val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
                 val appNodes = doc.getElementsByTagName("App")
-                for (i in 0 until appNodes.length) {
-                    val node = appNodes.item(i) as? Element ?: continue
-                    val title = node.getElementsByTagName("AppTitle").item(0)?.textContent?.trim() ?: "Unknown"
-                    val idStr = node.getElementsByTagName("ID").item(0)?.textContent?.trim() ?: continue
+                val nodesToProcess = if (appNodes.length > 0) appNodes else doc.getElementsByTagName("app")
+                for (i in 0 until nodesToProcess.length) {
+                    val node = nodesToProcess.item(i) as? Element ?: continue
+                    val title = (node.getElementsByTagName("AppTitle").item(0)?.textContent
+                        ?: node.getElementsByTagName("apptitle").item(0)?.textContent
+                        ?: "Unknown App").trim()
+                    val idStr = (node.getElementsByTagName("ID").item(0)?.textContent
+                        ?: node.getElementsByTagName("id").item(0)?.textContent)?.trim() ?: continue
                     val id = idStr.toIntOrNull() ?: continue
-                    val isCollector = node.getElementsByTagName("IsAppCollectorGame").item(0)?.textContent?.trim() == "1"
-                    val uuid = node.getElementsByTagName("AppUUID").item(0)?.textContent?.trim()
+                    val isCollector = (node.getElementsByTagName("IsAppCollectorGame").item(0)?.textContent
+                        ?: node.getElementsByTagName("isappcollectorgame").item(0)?.textContent)?.trim() == "1"
+                    val uuid = (node.getElementsByTagName("UUID").item(0)?.textContent
+                        ?: node.getElementsByTagName("AppUUID").item(0)?.textContent
+                        ?: node.getElementsByTagName("uuid").item(0)?.textContent)?.trim()?.takeIf { isValidUuid(it) }
+                    val hostOrder = (node.getElementsByTagName("IDX").item(0)?.textContent
+                        ?: node.getElementsByTagName("idx").item(0)?.textContent)?.trim()?.toIntOrNull()
+                    val artVersion = (node.getElementsByTagName("ArtVersion").item(0)?.textContent
+                        ?: node.getElementsByTagName("artversion").item(0)?.textContent)?.trim()
+                    val boxArtUrl = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/appasset?uniqueid=${host.serverId ?: "unknown"}&appid=$id&AssetType=2&AssetIdx=0"
+
                     apps.add(
                         StreamApp(
                             id = id,
                             title = title,
                             isAppCollectorGame = isCollector,
-                            uuid = uuid
+                            boxArtUrl = boxArtUrl,
+                            uuid = uuid,
+                            hostOrder = hostOrder,
+                            artVersion = artVersion
                         )
                     )
                 }

@@ -17,7 +17,7 @@ Status Definitions:
 | `Core/Models/Application.swift` | `core/models/Application.kt` | ported | Models `StreamApp`, `AppControl` enum (resume, terminate, remote monitor). |
 | `Core/Models/ClientFeatures.swift` | `core/models/ClientFeatures.kt` | ported | Maps client settings (desktop mouse, face button swap, persistent gamepad, decoder pref). |
 | `Core/Models/Host.swift` | `core/models/Host.kt` | ported | Host data model, capabilities, status, TLS certificate DER. |
-| `Core/Models/HostExtensions.swift` | `core/models/Host.kt` | ported | Extensions for effective URLs, display names, and address resolution. |
+| `Core/Models/HostExtensions.swift` | `core/models/HostExtensions.kt` | ported | Milestone M7: HostCapabilities parser/permissions, HostXMLValues, HostHardwareMetrics, OTPPairing. |
 | `Core/Models/PerAppSettings.swift` | `core/models/PerAppSettings.kt` | ported | Game-specific configuration overrides (resolution, FPS, bitrate, mode). |
 | `Core/Models/PerformanceMetrics.swift` | `core/models/PerformanceMetrics.kt` | ported | Real-time performance HUD data structure. |
 | `Core/Models/StreamConfiguration.swift` | `core/models/StreamConfiguration.kt` | ported | Video/Audio codec bitmasks, bitrate validation, resolution mapping. |
@@ -39,7 +39,7 @@ Status Definitions:
 | Reference File | Android File(s) | Status | Notes |
 | :--- | :--- | :--- | :--- |
 | `Core/State/AppState.swift` | `core/state/AppState.kt` | ported | Root reactive state, hosts collection, active navigation. |
-| `Core/State/HostWakeConnection.swift` | `core/state/HostWakeConnection.kt` | not started | Milestone M7: WoL send, waking status, 60s timeout loop. |
+| `Core/State/HostWakeConnection.swift` | `networking/HostWakeConnection.kt` | ported | Milestone M7: WoL resolve, serverinfo polling, 60s timeout loop. |
 | `Core/State/StreamSessionController.swift` | `core/state/StreamSessionController.kt` | ported | Milestone M3: Core engine; wired to native LiStartConnection, stages, error handling, session teardown, and HUD metrics. |
 
 ---
@@ -60,7 +60,7 @@ Status Definitions:
 | `Core/Utils/DisplaySleepManager.swift` | `core/utils/DisplaySleepManager.kt` | ported | Uses `FLAG_KEEP_SCREEN_ON` on the Android Window during streaming. |
 | `Core/Utils/GameArtworkSearchService.swift`| `core/utils/GameArtworkSearchService.kt`| not started | Milestone M7: IGDB/SteamGridDB cover fallback search. |
 | `Core/Utils/GameShortcutManager.swift` | `core/utils/GameShortcutManager.kt` | not started | Milestone M8: Android `ShortcutManagerCompat` pinned home screen shortcuts. |
-| `Core/Utils/HostAppShutdown.swift` | `core/utils/HostAppShutdown.kt` | not started | Milestone M7: Clean host app termination with expectedAppID verification. |
+| `Core/Utils/HostAppShutdown.swift` | `core/utils/HostAppShutdown.kt` | ported | Milestone M7: Cancellable shutdown deadline, app quit with expectedAppID verification. |
 | `Core/Utils/RuntimeServiceStatus.swift` | `core/utils/RuntimeServiceStatus.kt` | not started | Milestone M8: Runtime service checks. |
 | `Core/Utils/SharedDefaults.swift` | `core/state/AppSettingsStore.kt` | ported | SharedPreferences backed configuration persistence. |
 | `Core/Utils/ShortcutBundleStore.swift` | `core/utils/ShortcutBundleStore.kt` | not started | Milestone M8: Android shortcut metadata storage. |
@@ -102,8 +102,8 @@ Status Definitions:
 | Reference File | Android File(s) | Status | Notes |
 | :--- | :--- | :--- | :--- |
 | `Networking/Discovery/BonjourDiscoveryService.swift` | `networking/BonjourDiscoveryService.kt` | ported | Android `NsdManager` mDNS discovery for `_nvstream._tcp`. |
-| `Networking/Discovery/WakeOnLAN.swift` | `networking/WakeOnLAN.kt` | ported | UDP broadcast of magic packet on ports 7 and 9. |
-| `Networking/HTTP/HostControlClient.swift` | `networking/HostControlClient.kt` | not started | Milestone M7: Host commands, stats endpoint, runtime bitrate. |
+| `Networking/Discovery/WakeOnLAN.swift` | `networking/WakeOnLAN.kt` | ported | UDP broadcast of magic packet on ports 7 and 9, directed datagram send, subnet broadcast. |
+| `Networking/HTTP/HostControlClient.swift` | `networking/SunshineHTTPClient.kt` & `networking/HostControlError.kt` | ported | Milestone M7: Host commands (disconnect monitor/input, terminate), stats endpoint, runtime bitrate, sleep handshake. |
 | `Networking/HTTP/HostLaunchOptions.swift` | `networking/SunshineHTTPClient.kt` | ported | Milestone M2: Query parameters for virtual display, unsigned controller masks, HDR. |
 | `Networking/HTTP/PairingService.swift` | `networking/PairingService.kt` | ported | Milestone M2: 5-stage cryptographic handshake with PIN challenge and fail-closed HTTPS. |
 | `Networking/HTTP/SunshineHTTPClient.swift` | `networking/SunshineHTTPClient.kt` | ported | Milestone M2: Authenticated pinned HTTPS requests for serverinfo, launch (with common-c extra params & appuuid validation), resume. |
