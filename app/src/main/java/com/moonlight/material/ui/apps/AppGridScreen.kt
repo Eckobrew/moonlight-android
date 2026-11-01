@@ -33,6 +33,7 @@ fun AppGridScreen(
     val error by appState.appsError.collectAsState()
     val apps by appState.appsForSelectedHost.collectAsState()
     val isLoading by appState.isLoadingApps.collectAsState()
+    var shortcutApp by remember { mutableStateOf<StreamApp?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
     val filteredApps = remember(apps, searchQuery) {
@@ -202,18 +203,16 @@ fun AppGridScreen(
                             onConfigureOverrides = {
                                 appState.perAppSettingsApp.value = app
                             },
-                            onPinShortcut = {
-                                com.moonlight.material.core.utils.GameShortcutManager.pinGameShortcut(
-                                    context = context,
-                                    host = host,
-                                    app = app,
-                                    settings = currentSettings
-                                )
-                            }
+                            onPinShortcut = { shortcutApp = app }
                         )
                     }
                 }
             }
         }
+    }
+    shortcutApp?.let { app ->
+        ShortcutIconPickerSheet(host, app, appState.boxArtManager,
+            onStatus = { appState.hostActionMessage.value = it },
+            onDismiss = { shortcutApp = null })
     }
 }
