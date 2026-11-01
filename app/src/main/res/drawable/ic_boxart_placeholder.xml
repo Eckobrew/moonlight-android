@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="300dp"
+    android:viewportWidth="200"
+    android:viewportHeight="300">
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M0,0h200v300h-200z" />
+    <!-- Subtle Grid pattern / game console shape in center -->
+    <path
+        android:fillColor="#334155"
+        android:pathData="M70,120 C55,120 40,132 40,150 C40,165 52,176 66,176 C73,176 77,170 82,166 L88,166 C93,170 97,176 104,176 C118,176 130,165 130,150 C130,132 115,120 100,120 Z" />
+    <path
+        android:fillColor="#64748B"
+        android:pathData="M56,144 h12 v6 h-12 z M59,141 h6 v12 h-6 z M108,144 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 M116,152 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>

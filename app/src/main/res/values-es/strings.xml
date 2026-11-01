@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Moonlight</string>
+    <string name="add_host">Añadir host</string>
+    <string name="add_host_manually">Añadir host manualmente</string>
+    <string name="add_host_prompt">Añadir host de Sunshine / Apollo</string>
+    <string name="add_host_description">Introduce la dirección IP o el nombre de host de tu PC con Sunshine o Apollo.</string>
+    <string name="refresh">Actualizar</string>
+    <string name="settings">Ajustes</string>
+    <string name="logs">Registros</string>
+    <string name="cancel">Cancelar</string>
+    <string name="done">Listo</string>
+    <string name="save">Guardar</string>
+    <string name="connect">Conectar</string>
+    <string name="pair">Emparejar</string>
+    <string name="pairing">Emparejando…</string>
+    <string name="wake_on_lan">Wake-on-LAN</string>
+    <string name="waking">Despertando…</string>
+    <string name="unpair">Desemparejar</string>
+    <string name="delete">Eliminar</string>
+    <string name="host_details">Detalles del host</string>
+    <string name="online">En línea</string>
+    <string name="offline">Desconectado</string>
+    <string name="streaming">Transmitiendo</string>
+    <string name="pairing_required">Emparejamiento requerido</string>
+    <string name="enter_pin_prompt">Introduce este PIN en tu PC host:</string>
+    <string name="back">Atrás</string>
+    <string name="apps">Aplicaciones</string>
+    <string name="search_apps">Buscar aplicaciones…</string>
+    <string name="quit_app">Cerrar aplicación</string>
+    <string name="tab_display_video">Pantalla y Vídeo</string>
+    <string name="tab_audio">Audio</string>
+    <string name="tab_input">Entrada y Táctil</string>
+    <string name="tab_host">Host y Transmisión</string>
+    <string name="tab_controllers">Mandos</string>
+    <string name="tab_application">Aplicación</string>
+    <string name="performance_hud">HUD de rendimiento</string>
+    <string name="disconnect_stream">Desconectar transmisión</string>
+</resources>

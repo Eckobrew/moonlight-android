@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Moonlight</string>
+    <string name="add_host">Host hinzufügen</string>
+    <string name="add_host_manually">Host manuell hinzufügen</string>
+    <string name="add_host_prompt">Sunshine / Apollo Host hinzufügen</string>
+    <string name="add_host_description">Geben Sie die IP-Adresse oder den Hostnamen Ihres Sunshine- oder Apollo-PCs ein.</string>
+    <string name="refresh">Aktualisieren</string>
+    <string name="settings">Einstellungen</string>
+    <string name="logs">Protokolle</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="done">Fertig</string>
+    <string name="save">Speichern</string>
+    <string name="connect">Verbinden</string>
+    <string name="pair">Koppeln</string>
+    <string name="pairing">Kopplung…</string>
+    <string name="wake_on_lan">Wake-on-LAN</string>
+    <string name="waking">Wird aufgeweckt…</string>
+    <string name="unpair">Entkoppeln</string>
+    <string name="delete">Löschen</string>
+    <string name="host_details">Host-Details</string>
+    <string name="online">Online</string>
+    <string name="offline">Offline</string>
+    <string name="streaming">Streaming</string>
+    <string name="pairing_required">Kopplung erforderlich</string>
+    <string name="enter_pin_prompt">Geben Sie diese PIN auf Ihrem Host-PC ein:</string>
+    <string name="back">Zurück</string>
+    <string name="apps">Apps</string>
+    <string name="search_apps">Apps durchsuchen…</string>
+    <string name="quit_app">App beenden</string>
+    <string name="tab_display_video">Bildschirm &amp; Video</string>
+    <string name="tab_audio">Audio</string>
+    <string name="tab_input">Eingabe &amp; Touch</string>
+    <string name="tab_host">Host &amp; Stream</string>
+    <string name="tab_controllers">Controller</string>
+    <string name="tab_application">Anwendung</string>
+    <string name="performance_hud">Leistungs-HUD</string>
+    <string name="disconnect_stream">Stream trennen</string>
+</resources>

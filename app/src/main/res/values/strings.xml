@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Moonlight</string>
+    <string name="add_host">Add Host</string>
+    <string name="add_host_manually">Add Host Manually</string>
+    <string name="add_host_prompt">Add Sunshine / Apollo Host</string>
+    <string name="add_host_description">Enter the IP address or hostname of your PC running Sunshine or Apollo.</string>
+    <string name="host_name_optional">Host Name (optional):</string>
+    <string name="host_name_hint">e.g. Gaming PC</string>
+    <string name="ip_address_hostname">IP Address / Hostname:</string>
+    <string name="ip_hint">192.168.1.100</string>
+    <string name="port_optional">Port (optional):</string>
+    <string name="port_hint">47989</string>
+    <string name="refresh">Refresh</string>
+    <string name="settings">Settings</string>
+    <string name="logs">Logs</string>
+    <string name="cancel">Cancel</string>
+    <string name="done">Done</string>
+    <string name="save">Save</string>
+    <string name="connect">Connect</string>
+    <string name="pair">Pair</string>
+    <string name="pairing">Pairing…</string>
+    <string name="wake_on_lan">Wake-on-LAN</string>
+    <string name="waking">Waking…</string>
+    <string name="unpair">Unpair</string>
+    <string name="delete">Delete</string>
+    <string name="host_details">Host Details</string>
+    <string name="online">Online</string>
+    <string name="offline">Offline</string>
+    <string name="streaming">Streaming</string>
+    <string name="pairing_required">Pairing Required</string>
+    <string name="unknown">Unknown</string>
+    <string name="no_hosts_found">No hosts found</string>
+    <string name="no_hosts_subtitle">Ensure Sunshine or Apollo is running on your PC on the same Wi-Fi network, or add your host IP manually.</string>
+    <string name="no_apps_found">No applications found</string>
+    <string name="no_apps_subtitle">Check your Sunshine or Apollo configuration on your PC.</string>
+    <string name="enter_pin_prompt">Enter this PIN on your host PC:</string>
+    <string name="pin_instruction">Open Sunshine Web UI (or GeForce Experience) on your host PC and type this four-digit PIN.</string>
+    <string name="pair_success">Pairing Successful!</string>
+    <string name="pair_failed">Pairing Failed</string>
+    <string name="back">Back</string>
+    <string name="apps">Apps</string>
+    <string name="search_apps">Search apps…</string>
+    <string name="quit_app">Quit Application</string>
+    <string name="resume">Resume Session</string>
+
+    <!-- Settings Tabs -->
+    <string name="tab_display_video">Display &amp; Video</string>
+    <string name="tab_audio">Audio</string>
+    <string name="tab_input">Input &amp; Touch</string>
+    <string name="tab_host">Host &amp; Stream</string>
+    <string name="tab_controllers">Controllers</string>
+    <string name="tab_application">Application</string>
+
+    <!-- Video Settings -->
+    <string name="resolution">Resolution</string>
+    <string name="native_resolution">Native Screen</string>
+    <string name="custom_resolution">Custom</string>
+    <string name="width">Width</string>
+    <string name="height">Height</string>
+    <string name="frame_rate">Frame Rate</string>
+    <string name="bitrate">Bitrate</string>
+    <string name="remote_bitrate_override">Custom Bitrate for Remote Sessions</string>
+    <string name="remote_bitrate">Remote Bitrate</string>
+    <string name="video_codec">Video Codec</string>
+    <string name="enable_hdr">Enable HDR (10-bit High Dynamic Range)</string>
+    <string name="full_range_color">Full Dynamic Range Color (Full vs Limited)</string>
+    <string name="frame_pacing">Enable Frame Pacing</string>
+    <string name="vsync">Enable V-Sync</string>
+    <string name="decoder_preference">Video Decoder</string>
+    <string name="chroma_444">Enable 4:4:4 Chroma Subsampling</string>
+
+    <!-- Audio Settings -->
+    <string name="audio_configuration">Audio Configuration</string>
+    <string name="audio_stereo">Stereo</string>
+    <string name="audio_51">5.1 Surround</string>
+    <string name="audio_71">7.1 Surround</string>
+    <string name="mute_host_audio">Mute Host PC Speakers While Streaming</string>
+    <string name="mute_on_background">Mute Audio When App is in Background</string>
+
+    <!-- Input Settings -->
+    <string name="mouse_mode">Mouse Mode</string>
+    <string name="mouse_relative">Relative Pointer (Gaming Mode)</string>
+    <string name="mouse_desktop">Desktop Pointer (Touchpad Mode)</string>
+    <string name="mouse_sensitivity">Mouse Sensitivity</string>
+    <string name="swap_mouse_buttons">Swap Left &amp; Right Mouse Buttons</string>
+    <string name="reverse_scroll">Reverse Scroll Direction</string>
+    <string name="swap_win_alt">Swap Windows and Alt Keys</string>
+
+    <!-- Host Settings -->
+    <string name="optimize_games">Optimize Game Settings (SOPS)</string>
+    <string name="optimize_games_desc">Allows the host PC to automatically tune in-game graphics for optimal streaming performance.</string>
+    <string name="quit_on_disconnect">Quit Host App When Disconnecting</string>
+    <string name="clipboard_sync">Clipboard Synchronization</string>
+    <string name="clipboard_sync_desc">Automatically synchronizes copied text between Android and Apollo/Sunshine.</string>
+    <string name="virtual_display_mode">Virtual Display Mode</string>
+    <string name="keep_screen_on">Keep Screen Active</string>
+
+    <!-- Controller Settings -->
+    <string name="virtual_controller">Virtual Touch Controller</string>
+    <string name="virtual_controller_desc">Show on-screen touch joysticks and buttons when no physical gamepad is attached.</string>
+    <string name="controller_opacity">Touch Overlay Opacity</string>
+    <string name="gamepad_mouse">Controller Mouse Emulation</string>
+    <string name="gamepad_mouse_desc">Hold Start for 1 second to toggle pointer emulation with gamepad stick.</string>
+    <string name="swap_face_buttons">Swap Face Buttons (Nintendo A/B X/Y layout)</string>
+    <string name="background_gamepad">Allow Controller Input in Background</string>
+    <string name="persistent_gamepad">Persistent Gamepad Slot (Player 1)</string>
+
+    <!-- Application Settings -->
+    <string name="bonjour_discovery">Discover Hosts Automatically (mDNS)</string>
+    <string name="hide_unpaired">Hide Unpaired PCs</string>
+    <string name="language">Language</string>
+    <string name="discord_rpc">Discord Rich Presence</string>
+    <string name="discord_app_id">Discord Application ID</string>
+
+    <!-- Stream Session -->
+    <string name="connecting_stage">Connecting to host…</string>
+    <string name="stream_controls">Session Controls</string>
+    <string name="performance_hud">Performance HUD</string>
+    <string name="host_hardware_stats">Host Hardware Statistics</string>
+    <string name="runtime_bitrate">Runtime Bitrate</string>
+    <string name="apply">Apply</string>
+    <string name="disconnect_stream">Disconnect Stream</string>
+    <string name="per_game_settings">Game Settings…</string>
+    <string name="filter_logs">Filter logs…</string>
+    <string name="clear_logs">Clear Logs</string>
+    <string name="copy_logs">Copy Logs</string>
+</resources>
