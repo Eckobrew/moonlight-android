@@ -333,7 +333,10 @@ object MoonBridge {
     external fun sendKeyboardInput(keyCode: Short, keyAction: Byte, modifiers: Byte, flags: Byte)
 
     @JvmStatic
-    external fun sendUtf8Text(text: String)
+    fun sendUtf8Text(text: String) = sendUtf8TextBytes(text.toByteArray(Charsets.UTF_8))
+
+    @JvmStatic
+    external fun sendUtf8TextBytes(text: ByteArray): Int
 
     @JvmStatic
     external fun sendMultiControllerInput(

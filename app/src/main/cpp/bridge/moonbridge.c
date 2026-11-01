@@ -663,11 +663,14 @@ Java_com_moonlight_material_bridge_MoonBridge_sendKeyboardInput(JNIEnv *env, jcl
     LiSendKeyboardEvent2(keyCode, keyAction, modifiers, flags);
 }
 
-JNIEXPORT void JNICALL
-Java_com_moonlight_material_bridge_MoonBridge_sendUtf8Text(JNIEnv *env, jclass clazz, jstring text) {
-    const char* utf8Text = (*env)->GetStringUTFChars(env, text, NULL);
-    LiSendUtf8TextEvent(utf8Text, strlen(utf8Text));
-    (*env)->ReleaseStringUTFChars(env, text, utf8Text);
+JNIEXPORT jint JNICALL
+Java_com_moonlight_material_bridge_MoonBridge_sendUtf8TextBytes(JNIEnv *env, jclass clazz, jbyteArray text) {
+    jsize length = (*env)->GetArrayLength(env, text);
+    jbyte* bytes = (*env)->GetByteArrayElements(env, text, NULL);
+    if (bytes == NULL) return -1;
+    int result = LiSendUtf8TextEvent((const char*)bytes, length);
+    (*env)->ReleaseByteArrayElements(env, text, bytes, JNI_ABORT);
+    return result;
 }
 
 JNIEXPORT void JNICALL

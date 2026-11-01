@@ -5,6 +5,7 @@ import android.view.MotionEvent
 import kotlin.math.hypot
 
 interface MouseEventListener {
+    fun onNativeTouch(eventType: Byte, pointerId: Int, x: Float, y: Float, pressure: Float, major: Float, minor: Float): Int = -5501
     fun onMouseMoveRelative(deltaX: Short, deltaY: Short)
     fun onMouseMoveAbsolute(x: Short, y: Short, screenW: Short, screenH: Short)
     fun onMouseButton(button: Byte, isDown: Boolean)
@@ -26,19 +27,59 @@ class TouchMouseHandler(
     var swapMouseButtons: Boolean = false,
     var reverseScroll: Boolean = false
 ) {
+    private var nativeTouchSupported = true
+    private var nativeTouchActive = false
     private val relativeMotion = RelativeMouseMotion()
     private var lastX = 0f
     private var lastY = 0f
     private var downTime = 0L
+    private var downX = 0f
+    private var downY = 0f
+    private var multiTouch = false
     private var pointerCount = 0
 
     fun reset() {
+        if (nativeTouchActive) listener.onNativeTouch(7, 0, 0f, 0f, 0f, 0f, 0f)
+        nativeTouchActive = false
+        nativeTouchSupported = true
         relativeMotion.reset()
         lastX = 0f
         lastY = 0f
     }
 
     fun handleTouchEvent(event: MotionEvent, viewWidth: Int, viewHeight: Int): Boolean {
+        if (!isDesktopMouseMode && nativeTouchSupported &&
+            event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN) && viewWidth > 0 && viewHeight > 0) {
+            val type: Byte = when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> 1
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP ->
+                    if (android.os.Build.VERSION.SDK_INT >= 33 && event.flags and MotionEvent.FLAG_CANCELED != 0) 4 else 2
+                MotionEvent.ACTION_MOVE -> 3
+                MotionEvent.ACTION_CANCEL -> 7
+                else -> return false
+            }
+            val indices = if (event.actionMasked == MotionEvent.ACTION_MOVE) 0 until event.pointerCount
+                else event.actionIndex..event.actionIndex
+            var result = 0
+            if (type.toInt() == 7) {
+                result = listener.onNativeTouch(type, 0, 0f, 0f, 0f, 0f, 0f)
+            } else {
+                for (i in indices) {
+                    result = listener.onNativeTouch(type, event.getPointerId(i),
+                        (event.getX(i) / viewWidth).coerceIn(0f, 1f),
+                        (event.getY(i) / viewHeight).coerceIn(0f, 1f),
+                        event.getPressure(i).coerceIn(0f, 1f),
+                        event.getTouchMajor(i) / maxOf(viewWidth, viewHeight),
+                        event.getTouchMinor(i) / maxOf(viewWidth, viewHeight))
+                    if (result == -5501) break
+                }
+            }
+            if (result != -5501) {
+                nativeTouchActive = event.actionMasked != MotionEvent.ACTION_UP && type.toInt() != 7
+                return true
+            }
+            nativeTouchSupported = false
+        }
         pointerCount = event.pointerCount
 
         when (event.actionMasked) {
@@ -46,6 +87,9 @@ class TouchMouseHandler(
                 lastX = event.x
                 lastY = event.y
                 downTime = System.currentTimeMillis()
+                downX = event.x
+                downY = event.y
+                multiTouch = false
                 relativeMotion.reset()
 
                 if (!isDesktopMouseMode && viewWidth > 0 && viewHeight > 0) {
@@ -56,6 +100,17 @@ class TouchMouseHandler(
                         viewHeight.toShort()
                     )
                 }
+                return true
+            }
+
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                multiTouch = true
+                lastY = event.y
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                reset()
                 return true
             }
 
@@ -106,10 +161,10 @@ class TouchMouseHandler(
 
             MotionEvent.ACTION_UP -> {
                 val elapsed = System.currentTimeMillis() - downTime
-                val distance = hypot((event.x - lastX).toDouble(), (event.y - lastY).toDouble())
+                val distance = hypot((event.x - downX).toDouble(), (event.y - downY).toDouble())
 
                 // Quick tap detection: primary click
-                if (elapsed < 250 && distance < 20) {
+                if (!multiTouch && elapsed < 250 && distance < 20) {
                     val leftBtn = if (swapMouseButtons) MouseButtonCodes.BUTTON_RIGHT else MouseButtonCodes.BUTTON_LEFT
                     listener.onMouseButton(leftBtn, true)
                     listener.onMouseButton(leftBtn, false)
