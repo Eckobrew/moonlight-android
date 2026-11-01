@@ -101,6 +101,13 @@ object MoonBridge {
         }
     }
 
+    @JvmStatic
+    @Keep
+    fun bridgeClLogMessage(bytes: ByteArray) {
+        val message = bytes.toString(Charsets.UTF_8).trim()
+        if (message.isNotEmpty()) com.moonlight.material.core.utils.AppLogger.info(message, "COMMON_C")
+    }
+
     // --- Native Callback Handlers (invoked by JNI) ---
 
     @JvmStatic

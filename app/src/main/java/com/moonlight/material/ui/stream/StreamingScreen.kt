@@ -49,6 +49,7 @@ fun StreamingScreen(
 ) {
     val isStreaming by session.isStreaming.collectAsState()
     val stageName by session.currentStageName.collectAsState()
+    val connectionWarning by session.connectionWarning.collectAsState()
     val sessionError by session.sessionError.collectAsState()
     val metrics by session.metrics.collectAsState()
     val showHUD by session.showPerformanceOverlay.collectAsState()
@@ -229,11 +230,18 @@ fun StreamingScreen(
             )
         }
 
+        if (connectionWarning != null && stageName == "Connected" && !showControlsSheet && !showKeyboardOverlay) {
+            Surface(modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                color = MidnightBlue.copy(alpha = 0.85f), shape = MaterialTheme.shapes.small) {
+                Text(connectionWarning!!, color = AmberWarning, modifier = Modifier.padding(12.dp))
+            }
+        }
+
         // Error Dialog
         if (sessionError != null) {
             AlertDialog(
                 onDismissRequest = onFinish,
-                title = { Text("Stream Terminated", color = RoseError, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                title = { Text("Streaming Error", color = RoseError, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
                 text = { Text(sessionError ?: "", color = TextPrimary) },
                 confirmButton = {
                     Button(

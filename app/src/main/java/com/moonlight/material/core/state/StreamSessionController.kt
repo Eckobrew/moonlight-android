@@ -104,7 +104,9 @@ class StreamSessionController(
     var currentSettings: StreamSettings? = null
         private set
 
-    private var sessionGeneration: Long = 0
+    @Volatile private var sessionGeneration: Long = 0
+    private data class NativeFailure(val generation: Long, val stage: Int?, val code: Int)
+    @Volatile private var nativeFailure: NativeFailure? = null
     private var didLaunchHostApp = false
     private var preserveHostApplication = false
     var isRemoteMonitorSession = false
@@ -187,13 +189,15 @@ class StreamSessionController(
         val portStr = if (portFlags != 0) try { MoonBridge.stringifyPortFlags(portFlags, ", ") } catch (_: Throwable) { null } else null
         val stageName = try { MoonBridge.getStageName(stage) } catch (_: Throwable) { null }
         _sessionError.value = customMessage ?: ConnectionDiagnostics.stageFailure(stage, code, stageName, portStr)
-        stopSession()
+        AppLogger.error("Native stage $stage failed ($code): ${_sessionError.value}", TAG)
+        stopSession(forceQuitApp = false)
     }
 
     fun handleTerminated(code: Int, customMessage: String? = null) {
         if (!_isStreaming.value) return
         _sessionError.value = customMessage ?: ConnectionDiagnostics.termination(code)
-        stopSession()
+        AppLogger.error("Native connection terminated ($code): ${_sessionError.value}", TAG)
+        stopSession(forceQuitApp = false)
     }
 
     fun updateConnectionStatus(status: Int) {
@@ -235,6 +239,7 @@ class StreamSessionController(
                 activeSettings = settings
                 _isStreaming.value = true
                 _sessionError.value = null
+                nativeFailure = null
                 _connectionWarning.value = null
                 _currentStage.value = 1
                 _currentStageName.value = "Requesting session from host..."
@@ -408,8 +413,10 @@ class StreamSessionController(
             withContext(Dispatchers.Main) {
                 if (_isStreaming.value && sessionGeneration == generation) {
                     if (result != 0 && _sessionError.value == null) {
-                        _sessionError.value = "Connection failed with code $result"
-                        stopSession()
+                        val failure = nativeFailure?.takeIf { it.generation == generation }
+                        if (failure?.stage != null) handleStageFailed(failure.stage, failure.code)
+                        else if (failure != null) handleTerminated(failure.code)
+                        else handleStageFailed(_currentStage.value, result)
                     }
                 }
             }
@@ -666,43 +673,40 @@ class StreamSessionController(
 
     // --- MoonBridge.ConnectionListener ---
 
+    private fun dispatchNativeEvent(generation: Long = sessionGeneration, event: () -> Unit) {
+        scope.launch(Dispatchers.Main) {
+            if (generation == sessionGeneration && _isStreaming.value) event()
+        }
+    }
+
     override fun onStageStarting(stage: Int) {
         val stageName = try { MoonBridge.getStageName(stage) } catch (_: Throwable) { "Stage $stage" }
-        scope.launch(Dispatchers.Main) {
-            updateStage(stage, stageName)
-        }
+        dispatchNativeEvent { updateStage(stage, stageName) }
     }
 
-    override fun onStageComplete(stage: Int) {
-        // Stage completed successfully
-    }
+    override fun onStageComplete(stage: Int) { }
 
     override fun onStageFailed(stage: Int, errorCode: Int) {
-        scope.launch(Dispatchers.Main) {
-            handleStageFailed(stage, errorCode)
-        }
+        val generation = sessionGeneration
+        nativeFailure = NativeFailure(generation, stage, errorCode)
+        dispatchNativeEvent(generation) { handleStageFailed(stage, errorCode) }
     }
 
     override fun onConnectionStarted() {
-        scope.launch(Dispatchers.Main) {
-            markConnected()
-        }
+        dispatchNativeEvent { markConnected() }
     }
 
     override fun onConnectionTerminated(errorCode: Int) {
-        scope.launch(Dispatchers.Main) {
-            if (errorCode != 0) {
-                handleTerminated(errorCode)
-            } else {
-                stopSession()
-            }
+        val generation = sessionGeneration
+        if (errorCode != 0) nativeFailure = NativeFailure(generation, null, errorCode)
+        dispatchNativeEvent(generation) {
+            if (errorCode != 0) handleTerminated(errorCode)
+            else stopSession(forceQuitApp = false)
         }
     }
 
     override fun onConnectionStatusUpdate(connectionStatus: Int) {
-        scope.launch(Dispatchers.Main) {
-            updateConnectionStatus(connectionStatus)
-        }
+        dispatchNativeEvent { updateConnectionStatus(connectionStatus) }
     }
 
     override fun onSetHdrMode(enabled: Boolean, hdrMetadata: ByteArray?) {

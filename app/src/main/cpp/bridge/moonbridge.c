@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <pthread.h>
 #include <string.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <sys/auxv.h>
 #if defined(__arm__) || defined(__aarch64__)
@@ -36,6 +37,7 @@ static jmethodID BridgeArStopMethod;
 static jmethodID BridgeArCleanupMethod;
 static jmethodID BridgeArPlaySampleMethod;
 
+static jmethodID BridgeClLogMessageMethod;
 static jmethodID BridgeClStageStartingMethod;
 static jmethodID BridgeClStageCompleteMethod;
 static jmethodID BridgeClStageFailedMethod;
@@ -365,10 +367,24 @@ static void BridgeClSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8
 }
 
 static void BridgeClLogMessage(const char* format, ...) {
+    char message[2048];
     va_list va;
     va_start(va, format);
-    __android_log_vprint(ANDROID_LOG_INFO, "moonlight-common-c", format, va);
+    vsnprintf(message, sizeof(message), format, va);
     va_end(va);
+    __android_log_print(ANDROID_LOG_INFO, "moonlight-common-c", "%s", message);
+    JNIEnv* env = GetThreadEnv();
+    if (env && !(*env)->ExceptionCheck(env) && BridgeClLogMessageMethod) {
+        jsize length = (jsize)strlen(message);
+        jbyteArray bytes = (*env)->NewByteArray(env, length);
+        if (bytes != NULL) {
+            (*env)->SetByteArrayRegion(env, bytes, 0, length, (const jbyte*)message);
+            (*env)->CallStaticVoidMethod(env, GlobalBridgeClass, BridgeClLogMessageMethod, bytes);
+            (*env)->DeleteLocalRef(env, bytes);
+        }
+        // A failed diagnostic callback must not poison the streaming thread's JNI state.
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    }
 }
 
 static DECODER_RENDERER_CALLBACKS BridgeVideoRendererCallbacks = {
@@ -449,6 +465,7 @@ Java_com_moonlight_material_bridge_MoonBridge_init(JNIEnv *env, jclass clazz) {
     BridgeArCleanupMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeArCleanup", "()V");
     BridgeArPlaySampleMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeArPlaySample", "([S)V");
 
+    BridgeClLogMessageMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClLogMessage", "([B)V");
     BridgeClStageStartingMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClStageStarting", "(I)V");
     BridgeClStageCompleteMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClStageComplete", "(I)V");
     BridgeClStageFailedMethod = (*env)->GetStaticMethodID(env, clazz, "bridgeClStageFailed", "(II)V");
