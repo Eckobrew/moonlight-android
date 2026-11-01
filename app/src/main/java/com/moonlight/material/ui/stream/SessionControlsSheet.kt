@@ -43,7 +43,6 @@ fun SessionControlsSheet(
     val showHostStats by session.showHostStatistics.collectAsState()
     val hostControlMessage by session.hostControlMessage.collectAsState()
     val activeHost = session.activeHost
-    val controlButtonColors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
 
     var commandsMenuExpanded by remember { mutableStateOf(false) }
     var showQuitConfirmDialog by remember { mutableStateOf(false) }
@@ -102,9 +101,9 @@ fun SessionControlsSheet(
                     onDismiss()
                     onShowKeyboard()
                 },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                colors = controlButtonColors
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
             ) {
                 Icon(Icons.Default.Keyboard, contentDescription = null)
                 Spacer(modifier = Modifier.width(10.dp))
@@ -119,32 +118,32 @@ fun SessionControlsSheet(
                 OutlinedButton(onClick = {
                     session.setTouchpadMode(false)
                     onTouchModeChanged(false)
-                }, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp),
-                    colors = controlButtonColors) {
+                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)) {
                     Text(if (!touchpadMode) "✓ Touchscreen" else "Touchscreen", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                 }
                 OutlinedButton(onClick = {
                     session.setTouchpadMode(true)
                     onTouchModeChanged(true)
-                }, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp),
-                    colors = controlButtonColors) {
+                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)) {
                     Text(if (touchpadMode) "✓ Touchpad" else "Touchpad", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                 }
             }
 
             OutlinedButton(
                 onClick = { session.togglePerformanceOverlay() },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                colors = controlButtonColors
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
             ) { Text(if (showHUD) "Hide Performance HUD" else "Show Performance HUD", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold) }
 
             OutlinedButton(
                 onClick = { onToggleController(); onDismiss() },
                 enabled = !controllerConnected,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                colors = controlButtonColors
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
             ) {
                 Text(if (controllerConnected) "Gamepad hidden: physical controller connected"
                     else if (controllerVisible) "Hide On-screen Gamepad" else "Show On-screen Gamepad",
@@ -300,43 +299,40 @@ fun SessionControlsSheet(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
-
-            Spacer(Modifier.height(20.dp))
             // Disconnect button
-            OutlinedButton(
+            Button(
                 onClick = {
                     onDismiss()
                     session.disconnectStream()
                     onFinish()
                 },
-                colors = controlButtonColors,
+                colors = ButtonDefaults.buttonColors(containerColor = CardNavy),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Close, null, tint = CyanAccent, modifier = Modifier.align(Alignment.CenterStart))
+                    Icon(Icons.Default.Close, null, tint = TextPrimary, modifier = Modifier.align(Alignment.CenterStart))
                     Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Disconnect Stream", color = CyanAccent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Text("Disconnect Stream", color = TextPrimary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                         Text("Leave game running on host to resume later", style = MaterialTheme.typography.bodySmall, color = TextSecondary, textAlign = TextAlign.Center)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(0.dp))
 
             // Quit Game button
-            OutlinedButton(
+            Button(
                 onClick = { showQuitConfirmDialog = true },
                 enabled = !isQuitting,
-                colors = controlButtonColors,
+                colors = ButtonDefaults.buttonColors(containerColor = RoseError.copy(alpha = 0.9f)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.PowerSettingsNew, null, tint = CyanAccent, modifier = Modifier.align(Alignment.CenterStart))
+                    Icon(Icons.Default.PowerSettingsNew, null, tint = TextPrimary, modifier = Modifier.align(Alignment.CenterStart))
                     Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(if (isQuitting) "Quitting…" else "Quit Game", color = CyanAccent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                        Text("Terminate app on host PC", style = MaterialTheme.typography.bodySmall, color = CyanAccent.copy(alpha = 0.85f), textAlign = TextAlign.Center)
+                        Text(if (isQuitting) "Quitting…" else "Quit Game", color = TextPrimary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Text("Terminate app on host PC", style = MaterialTheme.typography.bodySmall, color = TextPrimary.copy(alpha = 0.85f), textAlign = TextAlign.Center)
                     }
                 }
             }
