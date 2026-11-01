@@ -14,6 +14,8 @@ import com.moonlight.material.networking.BonjourDiscoveryService
 import com.moonlight.material.networking.PairingService
 import com.moonlight.material.networking.SunshineHTTPClient
 import com.moonlight.material.networking.WakeOnLAN
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +29,7 @@ class AppState(context: Context) : ViewModel() {
     private val settingsStore = AppSettingsStore(context)
     val certificateManager = CertificateManager.initialize(context)
     val httpClient = SunshineHTTPClient(certificateManager)
+    val boxArtManager = com.moonlight.material.core.utils.BoxArtManager(context, httpClient)
     val pairingService = PairingService(httpClient, certificateManager)
     private val discoveryService = BonjourDiscoveryService(context)
 
@@ -43,6 +46,9 @@ class AppState(context: Context) : ViewModel() {
 
     private val _appsForSelectedHost = MutableStateFlow<List<StreamApp>>(emptyList())
     val appsForSelectedHost: StateFlow<List<StreamApp>> = _appsForSelectedHost.asStateFlow()
+
+    private var appsJob: Job? = null
+    val appsError = MutableStateFlow<String?>(null)
 
     private val _isLoadingApps = MutableStateFlow(false)
     val isLoadingApps: StateFlow<Boolean> = _isLoadingApps.asStateFlow()
@@ -76,29 +82,34 @@ class AppState(context: Context) : ViewModel() {
         refreshHosts()
     }
 
+    fun reloadSettings() { _settings.value = settingsStore.loadSettings() }
+
     fun updateSettings(newSettings: StreamSettings) {
         _settings.value = newSettings
         settingsStore.saveSettings(newSettings)
     }
 
     fun refreshHosts() {
+        if (_isRefreshingHosts.value) return
+        _isRefreshingHosts.value = true
         viewModelScope.launch {
-            _isRefreshingHosts.value = true
-            val currentList = _hosts.value.toList()
-            val updated = mutableListOf<Host>()
-
-            for (h in currentList) {
-                try {
-                    val (refreshed, _) = httpClient.fetchServerInfo(h)
-                    updated.add(refreshed)
-                } catch (e: Exception) {
-                    updated.add(h.copy(status = HostStatus.OFFLINE))
+            try {
+                for (host in _hosts.value.toList()) {
+                    val refreshed = try {
+                        httpClient.fetchServerInfo(host).first
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        host.copy(status = HostStatus.OFFLINE)
+                    }
+                    // A refresh must never resurrect a deleted host or overwrite a pairing/action.
+                    if (_hosts.value.find { it.id == host.id } == host) {
+                        addOrUpdateHost(refreshed)
+                    }
                 }
+            } finally {
+                _isRefreshingHosts.value = false
             }
-
-            _hosts.value = updated
-            settingsStore.saveHosts(updated)
-            _isRefreshingHosts.value = false
         }
     }
 
@@ -110,6 +121,7 @@ class AppState(context: Context) : ViewModel() {
                     name = name,
                     address = address,
                     httpPort = port,
+                    httpsPort = port - 5,
                     status = HostStatus.UNKNOWN
                 )
                 try {
@@ -128,6 +140,7 @@ class AppState(context: Context) : ViewModel() {
                 name = name.ifEmpty { "Host ($address)" },
                 address = address,
                 httpPort = port,
+                httpsPort = port - 5,
                 status = HostStatus.UNKNOWN
             )
             try {
@@ -144,12 +157,39 @@ class AppState(context: Context) : ViewModel() {
         val current = _hosts.value.toMutableList()
         val index = current.indexOfFirst { it.address == host.address || (it.serverId != null && it.serverId == host.serverId) }
         if (index >= 0) {
-            current[index] = host
+            val existing = current[index]
+            current[index] = if (existing.id != host.id) {
+                host.copy(
+                    id = existing.id,
+                    isPaired = existing.isPaired,
+                    serverCertificateDER = existing.serverCertificateDER
+                )
+            } else host
         } else {
             current.add(host)
         }
         _hosts.value = current
         settingsStore.saveHosts(current)
+        _selectedHost.value?.let { selected ->
+            _selectedHost.value = current.find { it.id == selected.id }
+        }
+        hostDetailsToShow.value?.let { details ->
+            hostDetailsToShow.value = current.find { it.id == details.id }
+        }
+    }
+
+    fun saveRemoteAddress(host: Host, address: String, httpPort: Int, httpsPort: Int) {
+        viewModelScope.launch {
+            try {
+                val verified = httpClient.verifyRemoteAddress(host, address, httpPort, httpsPort)
+                val latest = _hosts.value.find { it.id == host.id } ?: return@launch
+                addOrUpdateHost(latest.copy(remoteAddress = verified.remoteAddress,
+                    remoteHTTPPort = verified.remoteHTTPPort, remoteHTTPSPort = verified.remoteHTTPSPort))
+                hostActionMessage.value = "Remote address verified and saved."
+            } catch (e: Exception) {
+                hostActionMessage.value = "Could not verify remote address: ${e.message}"
+            }
+        }
     }
 
     fun deleteHost(host: Host) {
@@ -158,13 +198,21 @@ class AppState(context: Context) : ViewModel() {
         _hosts.value = current
         settingsStore.saveHosts(current)
         if (_selectedHost.value?.id == host.id) {
-            _selectedHost.value = null
+            deselectHost()
         }
     }
 
     fun unpairHost(host: Host) {
         viewModelScope.launch {
-            httpClient.unpair(host)
+            try {
+                if (!httpClient.unpair(host)) {
+                    hostActionMessage.value = "Could not unpair ${host.name}. Check that the host is reachable."
+                    return@launch
+                }
+            } catch (e: Exception) {
+                hostActionMessage.value = "Could not unpair ${host.name}: ${e.message}"
+                return@launch
+            }
             val updated = host.copy(
                 isPaired = false,
                 serverCertificateDER = null,
@@ -206,12 +254,22 @@ class AppState(context: Context) : ViewModel() {
         }
     }
 
+    private var pairingJob: Job? = null
+
+    fun cancelPairing() {
+        pairingJob?.cancel()
+        pairingHost.value = null
+        pairingPin.value = null
+        pairingStageMessage.value = null
+    }
+
     fun startPairing(host: Host) {
+        if (pairingJob?.isActive == true) return
         pairingHost.value = host
         pairingPin.value = null
         pairingStageMessage.value = "Generating PIN…"
 
-        viewModelScope.launch {
+        pairingJob = viewModelScope.launch {
             try {
                 val pairedHost = pairingService.pair(
                     host = host,
@@ -226,6 +284,8 @@ class AppState(context: Context) : ViewModel() {
                 pairingHost.value = null
                 pairingPin.value = null
                 hostActionMessage.value = "Successfully paired with ${pairedHost.name}!"
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 pairingStageMessage.value = "Pairing failed: ${e.message}"
                 delay(3000)
@@ -235,33 +295,64 @@ class AppState(context: Context) : ViewModel() {
     }
 
     fun selectHost(host: Host) {
+        if (_selectedHost.value?.id != host.id) {
+            appsJob?.cancel()
+            _appsForSelectedHost.value = emptyList()
+            appsError.value = null
+        }
         _selectedHost.value = host
         loadApps(host)
     }
 
     fun deselectHost() {
+        appsJob?.cancel()
         _selectedHost.value = null
         _appsForSelectedHost.value = emptyList()
+        appsError.value = null
+        _isLoadingApps.value = false
     }
 
     fun loadApps(host: Host) {
-        viewModelScope.launch {
+        if (_selectedHost.value?.id != host.id || appsJob?.isActive == true) return
+        appsJob = viewModelScope.launch {
             _isLoadingApps.value = true
+            appsError.value = null
             try {
-                val apps = httpClient.fetchAppList(host)
-                _appsForSelectedHost.value = apps
+                val resolved = httpClient.fetchServerInfo(host).first
+                val apps = httpClient.fetchAppList(resolved)
+                if (_selectedHost.value?.id == host.id) {
+                    addOrUpdateHost(resolved)
+                    _appsForSelectedHost.value = apps
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 AppLogger.error("Failed to load apps: ${e.message}", TAG)
-                _appsForSelectedHost.value = emptyList()
+                if (_selectedHost.value?.id == host.id) {
+                    appsError.value = "Could not refresh applications: ${e.message}"
+                }
             } finally {
-                _isLoadingApps.value = false
+                if (_selectedHost.value?.id == host.id) _isLoadingApps.value = false
             }
         }
     }
 
+    override fun onCleared() {
+        discoveryService.stopDiscovery()
+        super.onCleared()
+    }
+
     fun quitRunningAppOnHost(host: Host) {
         viewModelScope.launch {
-            httpClient.quitApp(host)
+            try {
+                if (!httpClient.quitApp(host)) {
+                    hostActionMessage.value = "The host did not confirm quitting the application."
+                    return@launch
+                }
+            } catch (e: Exception) {
+                hostActionMessage.value = "Could not quit the application: ${e.message}"
+                return@launch
+            }
             delay(500)
             loadApps(host)
             refreshHosts()

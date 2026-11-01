@@ -23,7 +23,7 @@ class BoxArtManager(
     }
 
     fun cacheKey(host: Host, app: StreamApp): String {
-        val raw = "${host.macAddress ?: host.address}_${app.stableIdentity}"
+        val raw = "${host.serverId ?: host.id}_${app.stableIdentity}_${app.artVersion.orEmpty()}"
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray())
         return digest.joinToString("") { "%02x".format(it) } + ".jpg"
     }
@@ -48,6 +48,8 @@ class BoxArtManager(
             val bytes = client.fetchBoxArt(host, app.id, app.uuid)
             saveToCache(cached, bytes)
             cached
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             AppLogger.warn("Failed to fetch box art for ${app.title}: ${e.message}", "BoxArtManager")
             if (cached.exists() && cached.length() > 0) cached else null

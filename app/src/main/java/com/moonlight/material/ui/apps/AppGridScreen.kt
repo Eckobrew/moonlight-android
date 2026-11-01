@@ -1,5 +1,6 @@
 package com.moonlight.material.ui.apps
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -28,6 +29,8 @@ fun AppGridScreen(
     appState: AppState,
     onLaunchApp: (StreamApp) -> Unit
 ) {
+    BackHandler { appState.deselectHost() }
+    val error by appState.appsError.collectAsState()
     val apps by appState.appsForSelectedHost.collectAsState()
     val isLoading by appState.isLoadingApps.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
@@ -61,8 +64,11 @@ fun AppGridScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { appState.loadApps(host) }) {
+                    IconButton(enabled = !isLoading, onClick = { appState.loadApps(host) }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextPrimary)
+                    }
+                    IconButton(onClick = { appState.isShowingSettings.value = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = TextPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepNavy)
@@ -151,7 +157,13 @@ fun AppGridScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            if (isLoading) {
+            if (error != null) {
+                Text(error!!, color = RoseError, modifier = Modifier.padding(16.dp))
+            }
+            if (isLoading && apps.isNotEmpty()) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = CyanAccent)
+            }
+            if (isLoading && apps.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -164,7 +176,9 @@ fun AppGridScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = stringResource(R.string.no_apps_found),
+                        text = if (error != null) "Unable to load applications. Tap Refresh to retry."
+                            else if (searchQuery.isNotBlank()) "No matching applications"
+                            else stringResource(R.string.no_apps_found),
                         style = MaterialTheme.typography.titleMedium,
                         color = TextSecondary
                     )
@@ -183,6 +197,7 @@ fun AppGridScreen(
                         AppCard(
                             host = host,
                             app = app,
+                            boxArtManager = appState.boxArtManager,
                             onLaunch = { onLaunchApp(app) },
                             onConfigureOverrides = {
                                 appState.perAppSettingsApp.value = app

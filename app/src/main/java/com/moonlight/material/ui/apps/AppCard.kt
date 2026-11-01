@@ -10,7 +10,9 @@ import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import java.io.File
+import com.moonlight.material.core.utils.BoxArtManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,10 +33,14 @@ import com.moonlight.material.ui.theme.*
 fun AppCard(
     host: Host,
     app: StreamApp,
+    boxArtManager: BoxArtManager,
     onLaunch: () -> Unit,
     onConfigureOverrides: () -> Unit,
     onPinShortcut: () -> Unit = {}
 ) {
+    val artwork by produceState<File?>(null, host.id, host.effectiveAddress, app.stableIdentity, app.artVersion) {
+        value = boxArtManager.loadBoxArt(host, app)
+    }
     val isRunning = app.matchesRunning(host)
 
     Column(
@@ -52,7 +58,7 @@ fun AppCard(
             // Boxart image
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
-                    .data(app.boxArtUrl)
+                    .data(artwork)
                     .crossfade(true)
                     .build(),
                 placeholder = painterResource(R.drawable.ic_boxart_placeholder),
