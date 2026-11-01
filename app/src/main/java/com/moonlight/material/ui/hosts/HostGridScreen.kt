@@ -38,13 +38,6 @@ fun HostGridScreen(appState: AppState) {
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.NightsStay,
-                            contentDescription = null,
-                            tint = CyanAccent,
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = stringResource(R.string.app_name),
                             style = MaterialTheme.typography.titleLarge,
@@ -59,7 +52,7 @@ fun HostGridScreen(appState: AppState) {
                         Icon(Icons.Default.Add, contentDescription = "Add Host", tint = TextPrimary)
                     }
                     // Refresh
-                    IconButton(onClick = { appState.refreshHosts() }) {
+                    IconButton(enabled = !isRefreshing, onClick = { appState.refreshHosts() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextPrimary)
                     }
                     // Logs
