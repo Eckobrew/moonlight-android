@@ -5,11 +5,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.Monitor
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -95,60 +92,29 @@ fun SessionControlsSheet(
                 )
             }
 
-            // Quick Action: Show Keyboard
-            OutlinedButton(
-                onClick = {
-                    onDismiss()
-                    onShowKeyboard()
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
-            ) {
-                Icon(Icons.Default.Keyboard, contentDescription = null)
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "Show On-Screen Keyboard",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-
+            StreamMenuButton("Show On-Screen Keyboard", Icons.Default.Keyboard, onClick = {
+                onDismiss()
+                onShowKeyboard()
+            })
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-                OutlinedButton(onClick = {
-                    session.setTouchpadMode(false)
-                    onTouchModeChanged(false)
-                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)) {
-                    Text(if (!touchpadMode) "✓ Touchscreen" else "Touchscreen", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                }
-                OutlinedButton(onClick = {
-                    session.setTouchpadMode(true)
-                    onTouchModeChanged(true)
-                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)) {
-                    Text(if (touchpadMode) "✓ Touchpad" else "Touchpad", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                }
+                StreamMenuButton("Touchscreen", if (!touchpadMode) Icons.Default.Check else Icons.Default.TouchApp,
+                    modifier = Modifier.weight(1f), onClick = {
+                        session.setTouchpadMode(false)
+                        onTouchModeChanged(false)
+                    })
+                StreamMenuButton("Touchpad", if (touchpadMode) Icons.Default.Check else Icons.Default.Mouse,
+                    modifier = Modifier.weight(1f), onClick = {
+                        session.setTouchpadMode(true)
+                        onTouchModeChanged(true)
+                    })
             }
-
-            OutlinedButton(
-                onClick = { session.togglePerformanceOverlay() },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
-            ) { Text(if (showHUD) "Hide Performance HUD" else "Show Performance HUD", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold) }
-
-            OutlinedButton(
-                onClick = { onToggleController(); onDismiss() },
-                enabled = !controllerConnected,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
-            ) {
-                Text(if (controllerConnected) "Gamepad hidden: physical controller connected"
-                    else if (controllerVisible) "Hide On-screen Gamepad" else "Show On-screen Gamepad",
-                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            }
+            StreamMenuButton(if (showHUD) "Hide Performance HUD" else "Show Performance HUD",
+                Icons.Default.Speed, onClick = { session.togglePerformanceOverlay() })
+            StreamMenuButton(
+                if (controllerConnected) "Gamepad hidden: physical controller connected"
+                else if (controllerVisible) "Hide On-screen Gamepad" else "Show On-screen Gamepad",
+                Icons.Default.SportsEsports, enabled = !controllerConnected,
+                onClick = { onToggleController(); onDismiss() })
 
             // Set Bitrate Section
             Surface(
@@ -377,5 +343,27 @@ fun SessionControlsSheet(
             },
             containerColor = MidnightBlue
         )
+    }
+}
+
+/** The original keyboard-button definition shared by every stream quick action. */
+@Composable
+private fun StreamMenuButton(
+    text: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
+    ) {
+        Icon(icon, contentDescription = null)
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(text = text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     }
 }
