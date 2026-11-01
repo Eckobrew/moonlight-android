@@ -105,12 +105,10 @@ class GamepadHandler(
         return true
     }
 
-    fun handleKeyEvent(event: KeyEvent): Boolean {
-        val isDown = event.action == KeyEvent.ACTION_DOWN
-
+    fun handleButton(keyCode: Int, isDown: Boolean, repeatCount: Int = 0): Boolean {
         // Check for hold-Start to toggle mouse emulation
-        if (event.keyCode == KeyEvent.KEYCODE_BUTTON_START && gamepadMouseEnabled) {
-            if (isDown && event.repeatCount == 0) {
+        if (keyCode == KeyEvent.KEYCODE_BUTTON_START && gamepadMouseEnabled) {
+            if (isDown && repeatCount == 0) {
                 handler?.postDelayed(startHoldRunnable, 1000L)
             } else if (!isDown) {
                 handler?.removeCallbacks(startHoldRunnable)
@@ -118,7 +116,7 @@ class GamepadHandler(
         }
 
         if (isMouseEmulationMode) {
-            when (event.keyCode) {
+            when (keyCode) {
                 KeyEvent.KEYCODE_BUTTON_A -> {
                     listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_LEFT, isDown)
                     return true
@@ -130,7 +128,7 @@ class GamepadHandler(
             }
         }
 
-        val buttonMask = mapKeyCodeToButton(event.keyCode) ?: return false
+        val buttonMask = mapKeyCodeToButton(keyCode) ?: return false
 
         buttonFlags = if (isDown) {
             buttonFlags or buttonMask
@@ -140,6 +138,10 @@ class GamepadHandler(
 
         notifyState()
         return true
+    }
+
+    fun handleKeyEvent(event: KeyEvent): Boolean {
+        return handleButton(event.keyCode, event.action == KeyEvent.ACTION_DOWN, event.repeatCount)
     }
 
     private fun mapKeyCodeToButton(keyCode: Int): Int? {
@@ -181,5 +183,13 @@ class GamepadHandler(
             rightStickX = rightStickX,
             rightStickY = rightStickY
         )
+    }
+
+    fun handleRumble(controllerNumber: Short, lowFreqMotor: Short, highFreqMotor: Short) {
+        AppLogger.debug("Rumble for controller $controllerNumber: low=$lowFreqMotor, high=$highFreqMotor", TAG)
+    }
+
+    fun handleRumbleTriggers(controllerNumber: Short, leftTrigger: Short, rightTrigger: Short) {
+        AppLogger.debug("Trigger rumble for controller $controllerNumber: L=$leftTrigger, R=$rightTrigger", TAG)
     }
 }

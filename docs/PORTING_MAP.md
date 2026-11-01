@@ -74,18 +74,18 @@ Status Definitions:
 
 | Reference File | Android File(s) | Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `Input/AdaptiveTriggerEffect.swift` | `stream/input/AdaptiveTriggerEffect.kt` | not started | Milestone M6: DualSense trigger effects where supported. |
-| `Input/ControllerMotionRequests.swift` | `stream/input/ControllerMotionRequests.kt` | not started | Milestone M6: Motion rate & category tracking per controller. |
-| `Input/ControllerUINavigation.swift` | `ui/navigation/ControllerUINavigation.kt` | not started | Milestone M6: D-pad / Gamepad navigation of host & app grids. |
-| `Input/DesktopMousePosition.swift` | `stream/input/DesktopMousePosition.kt` | not started | Milestone M6: Absolute desktop mouse positioning. |
-| `Input/GameControllerManager.swift` | `stream/input/GamepadHandler.kt` | not started | Milestone M6: Android `InputDevice` / `MotionEvent` mapping, rumble, arrival. |
-| `Input/InputCaptureCoordinator.swift` | `stream/input/InputCaptureCoordinator.kt`| not started | Milestone M6: Coordinates pointer capture and keyboard grab. |
+| `Input/AdaptiveTriggerEffect.swift` | `stream/input/GamepadHandler.kt` | ported | Adaptive trigger effects forwarding where supported. |
+| `Input/ControllerMotionRequests.swift` | `stream/input/GamepadHandler.kt` | ported | Motion rate & category tracking per controller. |
+| `Input/ControllerUINavigation.swift` | `stream/input/GamepadHandler.kt` | ported | D-pad / Gamepad navigation and input event handling. |
+| `Input/DesktopMousePosition.swift` | `stream/input/TouchMouseHandler.kt` | ported | Absolute desktop mouse positioning mode. |
+| `Input/GameControllerManager.swift` | `stream/input/GamepadHandler.kt` | ported | Android `InputDevice` / `MotionEvent` mapping, rumble, arrival. |
+| `Input/InputCaptureCoordinator.swift` | `StreamActivity.kt` | ported | Coordinates pointer capture, back button, and key interception. |
 | `Input/KeyboardGrab.swift` | `StreamActivity.kt` | ported | Android `View.requestPointerCapture` and key interception. |
-| `Input/KeyboardLayout.swift` | `stream/input/KeycodeMappings.kt` | not started | Milestone M6: Physical layout adjustments. |
-| `Input/KeyboardMonitor.swift` | `stream/input/KeyboardMonitor.kt` | not started | Milestone M6: Tracks pressed keys and sends releases on teardown. |
-| `Input/KeycodeMappings.swift` | `stream/input/KeycodeMappings.kt` | not started | Milestone M6: Android `KeyEvent` keycode -> Windows VK translation. |
-| `Input/MouseMonitor.swift` | `stream/input/TouchMouseHandler.kt` | not started | Milestone M6: Relative pointer capture, sensitivity, high-res scroll. |
-| `Input/StreamMouseState.swift` | `stream/input/StreamMouseState.kt` | not started | Milestone M6: Subpixel accumulation, button swapping, reverse scroll. |
+| `Input/KeyboardLayout.swift` | `stream/input/KeycodeMappings.kt` | ported | Physical layout adjustments and Win/Alt swapping. |
+| `Input/KeyboardMonitor.swift` | `StreamActivity.kt`, `core/state/StreamSessionController.kt` | ported | Key event interception and key release forwarding. |
+| `Input/KeycodeMappings.swift` | `stream/input/KeycodeMappings.kt` | ported | Android `KeyEvent` keycode -> Windows VK translation, modifiers, extended keys. |
+| `Input/MouseMonitor.swift` | `stream/input/TouchMouseHandler.kt` | ported | Relative pointer capture, sensitivity scaling, high-res scroll. |
+| `Input/StreamMouseState.swift` | `stream/input/StreamMouseState.kt` | ported | Relative mouse truncation, subpixel accumulation, mouse wheel ticks and clamping. |
 
 ---
 

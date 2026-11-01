@@ -84,13 +84,15 @@ class StreamActivity : ComponentActivity() {
                 sessionController.openSessionControls()
                 return true
             }
+            return super.onKeyDown(keyCode, event)
         }
-        if (::sessionController.isInitialized) {
+        if (::sessionController.isInitialized && sessionController.isStreaming.value) {
             if (sessionController.gamepadHandler.handleKeyEvent(event)) {
                 return true
             }
-            sessionController.sendKeyboardEvent(keyCode.toShort(), true)
-            return true
+            if (sessionController.handleKeyEvent(event)) {
+                return true
+            }
         }
         return super.onKeyDown(keyCode, event)
     }
@@ -102,12 +104,13 @@ class StreamActivity : ComponentActivity() {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             return true
         }
-        if (::sessionController.isInitialized) {
+        if (::sessionController.isInitialized && sessionController.isStreaming.value) {
             if (sessionController.gamepadHandler.handleKeyEvent(event)) {
                 return true
             }
-            sessionController.sendKeyboardEvent(keyCode.toShort(), false)
-            return true
+            if (sessionController.handleKeyEvent(event)) {
+                return true
+            }
         }
         return super.onKeyUp(keyCode, event)
     }

@@ -2,7 +2,6 @@ package com.moonlight.material.stream.input
 
 import android.view.InputDevice
 import android.view.MotionEvent
-import kotlin.math.abs
 import kotlin.math.hypot
 
 interface MouseEventListener {
@@ -12,20 +11,32 @@ interface MouseEventListener {
     fun onMouseScroll(amount: Short)
 }
 
+/**
+ * Handles touch gestures, virtual trackpad, and physical mouse input.
+ *
+ * Implements mouse motion scaling, sub-pixel sensitivity accumulation,
+ * and mouse wheel expansion matching StreamMouseState.
+ */
 class TouchMouseHandler(
     private val listener: MouseEventListener,
     var isDesktopMouseMode: Boolean = false,
     var mouseSensitivityX: Double = 1.0,
     var mouseSensitivityY: Double = 1.0,
+    var mouseSubPixelAccumulation: Boolean = true,
     var swapMouseButtons: Boolean = false,
     var reverseScroll: Boolean = false
 ) {
+    private val relativeMotion = RelativeMouseMotion()
     private var lastX = 0f
     private var lastY = 0f
     private var downTime = 0L
     private var pointerCount = 0
-    private var accumulatedX = 0.0
-    private var accumulatedY = 0.0
+
+    fun reset() {
+        relativeMotion.reset()
+        lastX = 0f
+        lastY = 0f
+    }
 
     fun handleTouchEvent(event: MotionEvent, viewWidth: Int, viewHeight: Int): Boolean {
         pointerCount = event.pointerCount
@@ -35,35 +46,58 @@ class TouchMouseHandler(
                 lastX = event.x
                 lastY = event.y
                 downTime = System.currentTimeMillis()
-                accumulatedX = 0.0
-                accumulatedY = 0.0
+                relativeMotion.reset()
+
+                if (!isDesktopMouseMode && viewWidth > 0 && viewHeight > 0) {
+                    listener.onMouseMoveAbsolute(
+                        event.x.toInt().toShort(),
+                        event.y.toInt().toShort(),
+                        viewWidth.toShort(),
+                        viewHeight.toShort()
+                    )
+                }
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
                 if (pointerCount == 1) {
-                    val rawDeltaX = (event.x - lastX) * mouseSensitivityX
-                    val rawDeltaY = (event.y - lastY) * mouseSensitivityY
+                    if (isDesktopMouseMode) {
+                        // Trackpad / relative mode
+                        val dx = (event.x - lastX).toDouble()
+                        val dy = (event.y - lastY).toDouble()
+                        val (deltaX, deltaY) = relativeMotion.consume(
+                            x = dx,
+                            y = dy,
+                            scaleX = mouseSensitivityX,
+                            scaleY = mouseSensitivityY,
+                            accumulateSensitivity = mouseSubPixelAccumulation
+                        )
 
-                    accumulatedX += rawDeltaX
-                    accumulatedY += rawDeltaY
-
-                    val intDeltaX = accumulatedX.toInt()
-                    val intDeltaY = accumulatedY.toInt()
-
-                    if (intDeltaX != 0 || intDeltaY != 0) {
-                        accumulatedX -= intDeltaX
-                        accumulatedY -= intDeltaY
-                        listener.onMouseMoveRelative(intDeltaX.toShort(), intDeltaY.toShort())
+                        if (deltaX.toInt() != 0 || deltaY.toInt() != 0) {
+                            listener.onMouseMoveRelative(deltaX, deltaY)
+                        }
+                    } else if (viewWidth > 0 && viewHeight > 0) {
+                        // Touchscreen / absolute mode
+                        listener.onMouseMoveAbsolute(
+                            event.x.toInt().toShort(),
+                            event.y.toInt().toShort(),
+                            viewWidth.toShort(),
+                            viewHeight.toShort()
+                        )
                     }
-
                     lastX = event.x
                     lastY = event.y
                 } else if (pointerCount == 2) {
-                    val dy = (event.y - lastY)
-                    val scrollDir = if (reverseScroll) -1 else 1
-                    if (abs(dy) > 10) {
-                        listener.onMouseScroll((dy * scrollDir / 5).toInt().toShort())
+                    // Two-finger scrolling
+                    val dy = (event.y - lastY).toDouble()
+                    val scrollDir = if (reverseScroll) -1.0 else 1.0
+                    val (_, wheelY) = MouseWheelMotion.consume(
+                        x = 0.0,
+                        y = (dy / 20.0) * scrollDir,
+                        precise = false
+                    )
+                    if (wheelY.toInt() != 0) {
+                        listener.onMouseScroll(wheelY)
                         lastY = event.y
                     }
                 }
@@ -74,7 +108,7 @@ class TouchMouseHandler(
                 val elapsed = System.currentTimeMillis() - downTime
                 val distance = hypot((event.x - lastX).toDouble(), (event.y - lastY).toDouble())
 
-                // Quick tap detection for clicks
+                // Quick tap detection: primary click
                 if (elapsed < 250 && distance < 20) {
                     val leftBtn = if (swapMouseButtons) MouseButtonCodes.BUTTON_RIGHT else MouseButtonCodes.BUTTON_LEFT
                     listener.onMouseButton(leftBtn, true)
@@ -87,7 +121,7 @@ class TouchMouseHandler(
                 if (pointerCount == 2) {
                     val elapsed = System.currentTimeMillis() - downTime
                     if (elapsed < 250) {
-                        // Two finger tap = right click
+                        // Two finger tap: secondary (right) click
                         val rightBtn = if (swapMouseButtons) MouseButtonCodes.BUTTON_LEFT else MouseButtonCodes.BUTTON_RIGHT
                         listener.onMouseButton(rightBtn, true)
                         listener.onMouseButton(rightBtn, false)
@@ -102,16 +136,32 @@ class TouchMouseHandler(
     fun handleGenericMotion(event: MotionEvent): Boolean {
         // Physical Mouse via Bluetooth or USB
         if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
-            val deltaX = (event.getAxisValue(MotionEvent.AXIS_RELATIVE_X) * mouseSensitivityX).toInt().toShort()
-            val deltaY = (event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y) * mouseSensitivityY).toInt().toShort()
+            val rawDx = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X).toDouble()
+            val rawDy = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y).toDouble()
+
+            val (deltaX, deltaY) = relativeMotion.consume(
+                x = rawDx,
+                y = rawDy,
+                scaleX = mouseSensitivityX,
+                scaleY = mouseSensitivityY,
+                accumulateSensitivity = mouseSubPixelAccumulation
+            )
+
             if (deltaX.toInt() != 0 || deltaY.toInt() != 0) {
                 listener.onMouseMoveRelative(deltaX, deltaY)
             }
 
-            val vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
-            if (vScroll != 0f) {
-                val scrollDir = if (reverseScroll) -1 else 1
-                listener.onMouseScroll((vScroll * 120 * scrollDir).toInt().toShort())
+            val vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL).toDouble()
+            if (vScroll != 0.0) {
+                val scrollDir = if (reverseScroll) -1.0 else 1.0
+                val (_, wheelY) = MouseWheelMotion.consume(
+                    x = 0.0,
+                    y = vScroll * scrollDir,
+                    precise = false
+                )
+                if (wheelY.toInt() != 0) {
+                    listener.onMouseScroll(wheelY)
+                }
             }
             return true
         }

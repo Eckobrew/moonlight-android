@@ -96,6 +96,9 @@ class StreamSessionController(
     val gamepadHandler = GamepadHandler(this)
     val touchMouseHandler = TouchMouseHandler(this)
 
+    var currentSettings: StreamSettings? = null
+        private set
+
     private var sessionGeneration: Long = 0
     private var didLaunchHostApp = false
     private var preserveHostApplication = false
@@ -269,6 +272,17 @@ class StreamSessionController(
                 }
 
                 if (!_isStreaming.value || sessionGeneration != generation) return@launch
+
+                currentSettings = settings
+                gamepadHandler.swapFaceButtons = settings.features.swapFaceButtons
+                gamepadHandler.gamepadMouseEnabled = settings.features.gamepadMouse
+                touchMouseHandler.isDesktopMouseMode = settings.features.desktopMouse
+                touchMouseHandler.mouseSensitivityX = settings.mouseSensitivityX * settings.mouseSensitivity
+                touchMouseHandler.mouseSensitivityY = settings.mouseSensitivityY * settings.mouseSensitivity
+                touchMouseHandler.mouseSubPixelAccumulation = settings.mouseSubPixelAccumulation
+                touchMouseHandler.swapMouseButtons = settings.features.swapMouseButtons
+                touchMouseHandler.reverseScroll = settings.features.reverseScroll
+                touchMouseHandler.reset()
 
                 // Create hardware video decoder and audio playback engine
                 videoDecoder = MediaCodecDecoder(
@@ -499,6 +513,24 @@ class StreamSessionController(
         } catch (_: Throwable) {}
     }
 
+    fun handleKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (!_isStreaming.value) return false
+        val isDown = event.action == android.view.KeyEvent.ACTION_DOWN
+        val hostKey = com.moonlight.material.stream.input.KeycodeMappings.hostKey(
+            androidKeyCode = event.keyCode,
+            swapWinAltKeys = currentSettings?.swapWinAltKeys ?: false
+        ) ?: return false
+
+        val modifiers = com.moonlight.material.stream.input.KeycodeMappings.extractModifiers(event, hostKey.extended)
+        val keyAction = if (isDown) com.moonlight.material.stream.input.KeycodeMappings.KEY_ACTION_DOWN else com.moonlight.material.stream.input.KeycodeMappings.KEY_ACTION_UP
+        return try {
+            MoonBridge.sendKeyboardInput(hostKey.wireCode, keyAction, modifiers, hostKey.flags)
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     fun applyRuntimeBitrate(mbps: Double) {
         if (mbps <= 0.0) return
         val kbps = (mbps * 1000).toInt()
@@ -552,11 +584,11 @@ class StreamSessionController(
     }
 
     override fun onRumble(controllerNumber: Short, lowFreqMotor: Short, highFreqMotor: Short) {
-        // Forwarded to GamepadHandler in M6
+        gamepadHandler.handleRumble(controllerNumber, lowFreqMotor, highFreqMotor)
     }
 
     override fun onRumbleTriggers(controllerNumber: Short, leftTrigger: Short, rightTrigger: Short) {
-        // Forwarded to GamepadHandler in M6
+        gamepadHandler.handleRumbleTriggers(controllerNumber, leftTrigger, rightTrigger)
     }
 
     override fun onSetMotionEventState(controllerNumber: Short, motionType: Byte, reportRateHz: Short) {
