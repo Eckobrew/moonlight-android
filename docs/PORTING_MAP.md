@@ -161,10 +161,17 @@ Status Definitions:
 | `UI/Stream/StreamNegotiationView.swift` | `ui/stream/StreamingScreen.kt` | ported | Stage progress indicator during connection. |
 | `UI/Stream/StreamingSessionView.swift` | `ui/stream/StreamingScreen.kt` | ported | SurfaceView container with gesture and controller routing. |
 
+## 10. Native Layer & Vendored Reference Dependencies
+
+| Reference File / Module | Android Port Target(s) | Status | Porting Notes |
+| :--- | :--- | :--- | :--- |
+| `Sources/MoonlightCommonC/include/Limelight.h` | `cpp/moonlight-common-c/`, `cpp/bridge/moonbridge.c`, `bridge/MoonBridge.kt` | ported | Milestone M1: moonlight-common-c native build with MbedTLS crypto backend and JNI bridge. |
+| `Sources/Copus/include/opus.h` | `cpp/opus/`, `cpp/bridge/moonbridge.c` | ported | Milestone M1: Opus native float build with multi-stream decode support. |
+
 ---
 
 ## Summary Statistics
-- **Total Reference Files Tracked**: 83
-- **Ported**: 35
-- **Not Started (Targeted in Milestones M1–M8)**: 40
+- **Total Reference Files Tracked**: 85
+- **Ported**: 37
+- **Not Started (Targeted in Milestones M2–M8)**: 40
 - **N/A on Android (Documented Reason)**: 8
