@@ -49,3 +49,11 @@ Audited 1 November 2026 against the reported intermittent connection, disappeari
 The stream menu now opens through Android Back only; floating top buttons are removed. The HUD keeps rendered FPS, decode timing, RTT and resolution/codec without received/decoded rates or target figures. Quick actions use the previous keyboard button style without spacer gaps. Closing the Android IME also clears local keyboard input mode.
 
 Remote configuration is automatic only. Default-network changes and successful pairing trigger discovery. A candidate must pass pinned WAN HTTPS/server-ID checks plus the corresponding HTTP server-ID check before being saved; LAN verification therefore exercises router hairpin access. Unverified candidates stay distinct from usable routes. Saved remote address/port metadata survives rediscovery merges and is persisted in saved_hosts. Manual remote address configuration has been removed.
+
+## Native Resume and exact original menu style
+
+Resume calculated the requested mode but did not send it. Its request now includes the resolved dimensions/FPS, additionalStates and SOPS, matching the reference Android request. Native resolution therefore reaches the host on both launch and resume.
+
+All remote discovery now requires both a default Wi-Fi/Ethernet connection and a directly connected physical host subnet before querying WAN information or considering any candidate. Cellular/VPN and off-subnet routes only use previously saved verified endpoints.
+
+The menu button definitions were compared directly against pre-audit commit 21eb74e. Natural-height cyan outlined keyboard/quick-action buttons and the filled dark Disconnect/red Quit buttons are restored, with centred exit labels and no added spacer gaps. The floating toolbar remains removed and the HUD omits received/decoded/target figures. The final APK builds successfully; further device interaction checks remain with the user.
