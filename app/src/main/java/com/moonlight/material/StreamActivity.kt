@@ -53,6 +53,8 @@ class StreamActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealSize(displaySize)
         val settings = requestedSettings.resolveNativeResolution(displaySize.x, displaySize.y)
+        com.moonlight.material.core.utils.AppLogger.info(
+            "Requested ${if (requestedSettings.isNativeResolution) "Native" else "preset"} stream mode: ${settings.width}x${settings.height}x${settings.fps}", "SESSION")
 
         val certManager = CertificateManager.getInstance()
         val httpClient = SunshineHTTPClient(certManager)

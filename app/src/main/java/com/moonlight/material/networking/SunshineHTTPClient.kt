@@ -354,7 +354,7 @@ class SunshineHTTPClient(
             }
         }
 
-        var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/resume?uniqueid=$uniqueId&rikey=$rikey&rikeyid=${Integer.toUnsignedString(rikeyId)}&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
+        var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/resume?uniqueid=$uniqueId&mode=$mode&additionalStates=1&sops=${if (settings.optimizeGameSettings) 1 else 0}&rikey=$rikey&rikeyid=${Integer.toUnsignedString(rikeyId)}&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
         url += buildLaunchQuery(settings, host)
         if (extraParams.isNotEmpty()) {
             url += extraParams
