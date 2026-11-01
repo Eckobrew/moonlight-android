@@ -104,3 +104,6 @@ target_link_libraries(moonlight-bridge PRIVATE
     mbedcrypto
     log
 )
+
+# Align the shared library for Android devices using 16 KB memory pages.
+target_link_options(moonlight-bridge PRIVATE "-Wl,-z,max-page-size=16384")
