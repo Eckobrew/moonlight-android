@@ -47,6 +47,9 @@ data class Host(
     val needsCertificatePairing: Boolean
         get() = isPaired && serverCertificateDER.isNullOrEmpty()
 
+    val isRemoteConnection: Boolean
+        get() = (remoteAddress != null && effectiveAddress == remoteAddress) || isPublicIPAddress(effectiveAddress)
+
     val effectiveAddress: String
         get() = activeAddress ?: address
 
@@ -70,6 +73,20 @@ data class Host(
         }
 
     companion object {
+        fun isPublicIPAddress(address: String): Boolean {
+            val raw = address.removePrefix("[").removeSuffix("]").lowercase()
+            val parts = raw.split('.').map { it.toIntOrNull() }
+            if (parts.size == 4 && parts.all { it != null && it in 0..255 }) {
+                val a = parts[0]!!; val b = parts[1]!!
+                return !(a == 0 || a == 10 || a == 127 || a >= 224 ||
+                    (a == 172 && b in 16..31) || (a == 192 && b == 168) ||
+                    (a == 169 && b == 254) || (a == 100 && b in 64..127))
+            }
+            // Global IPv6 unicast addresses are in 2000::/3. Hostnames require
+            // an explicitly configured remote endpoint to avoid DNS on the UI thread.
+            return raw.contains(':') && (raw.startsWith("2") || raw.startsWith("3"))
+        }
+
         fun urlHost(address: String): String {
             return if (address.contains(":") && !address.startsWith("[")) "[$address]" else address
         }

@@ -170,4 +170,59 @@ class TLSPinningTest {
             server.shutdown()
         }
     }
+
+    @Test
+    fun pairedIdentityIsSentEvenWhenRequestedIssuerDoesNotMatch() {
+        val material = generateServerCert()
+        val identity = com.moonlight.material.core.security.CertificateManager()
+        val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply {
+            init(material.keyStore, "password".toCharArray())
+        }
+        var authenticated = false
+        val serverTrust = object : javax.net.ssl.X509TrustManager {
+            override fun getAcceptedIssuers() = arrayOf(material.serverCert)
+            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {
+                assertEquals(identity.getClientCertificate(), chain?.firstOrNull())
+                authenticated = true
+            }
+        }
+        val serverContext = SSLContext.getInstance("TLS").apply {
+            init(kmf.keyManagers, arrayOf<TrustManager>(serverTrust), null)
+        }
+        val server = MockWebServer()
+        server.useHttps(serverContext.socketFactory, false)
+        server.requireClientAuth()
+        server.enqueue(MockResponse().setBody("authenticated"))
+        server.start()
+        try {
+            val (factory, trust) = HostTrust.createPinnedSSLSocketFactory(material.serverCertDer, identity)
+            val client = OkHttpClient.Builder()
+                .sslSocketFactory(factory, trust)
+                .hostnameVerifier { _, _ -> true }
+                .readTimeout(3, TimeUnit.SECONDS)
+                .build()
+            client.newCall(Request.Builder().url(server.url("/")).build()).execute().use {
+                assertEquals("authenticated", it.body?.string())
+            }
+            assertTrue(authenticated)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun authenticatedRequestsDoNotReuseTlsSessionContexts() {
+        val identity = com.moonlight.material.core.security.CertificateManager()
+        val host = com.moonlight.material.core.models.Host(
+            name = "PC", address = "localhost", isPaired = true,
+            serverCertificateDER = java.util.Base64.getEncoder().encodeToString(loadFixture("host.der"))
+        )
+        val http = com.moonlight.material.networking.SunshineHTTPClient(identity)
+        val first = http.getClientForHost(host)
+        val second = http.getClientForHost(host)
+        org.junit.Assert.assertNotSame(first.sslSocketFactory, second.sslSocketFactory)
+        assertTrue(!first.followRedirects)
+        assertTrue(!second.followRedirects)
+    }
 }

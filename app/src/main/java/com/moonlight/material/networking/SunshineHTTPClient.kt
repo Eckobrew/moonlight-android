@@ -21,6 +21,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.ConnectionPool
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -31,7 +33,6 @@ import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -60,8 +61,10 @@ class SunshineHTTPClient(
         .followSslRedirects(false)
         .build()
 
-    // Cache of authenticated HTTPS OkHttpClients pinned to each host's serverCertificateDER
-    private val pinnedClients = ConcurrentHashMap<String, OkHttpClient>()
+    private val closeConnection = Interceptor { chain ->
+        chain.proceed(chain.request().newBuilder().header("Connection", "close").build())
+    }
+
 
     /**
      * Obtains an authenticated OkHttpClient for the given host.
@@ -74,13 +77,17 @@ class SunshineHTTPClient(
         }
         val certMgr = certificateManager ?: throw HostTrustException("CertificateManager required for HTTPS connections.")
 
-        return pinnedClients.getOrPut(certDerBase64) {
+        // Android TLS session resumption can fail against GameStream's mTLS listener.
+        // Match Moonlight Android: use a fresh SSLContext for each request.
+        return run {
             val der = Base64.getDecoder().decode(certDerBase64)
             val (sslSocketFactory, trustManager) = HostTrust.createPinnedSSLSocketFactory(der, certMgr)
             OkHttpClient.Builder()
+                .connectionPool(ConnectionPool(0, 1, TimeUnit.MILLISECONDS))
                 .connectTimeout(5, TimeUnit.SECONDS)
                 .readTimeout(10, TimeUnit.SECONDS)
                 .writeTimeout(10, TimeUnit.SECONDS)
+                .addInterceptor(closeConnection)
                 .sslSocketFactory(sslSocketFactory, trustManager)
                 .hostnameVerifier { _, _ -> true } // Validated via certificateDER byte-exact pin
                 .followRedirects(false)
@@ -107,6 +114,7 @@ class SunshineHTTPClient(
                 .connectTimeout(timeoutSec, TimeUnit.SECONDS)
                 .readTimeout(timeoutSec, TimeUnit.SECONDS)
                 .writeTimeout(timeoutSec, TimeUnit.SECONDS)
+                .addInterceptor(closeConnection)
                 .sslSocketFactory(sslSocketFactory, trustManager)
                 .hostnameVerifier { _, _ -> true }
                 .followRedirects(false)
@@ -126,7 +134,43 @@ class SunshineHTTPClient(
         }
     }
 
-    suspend fun fetchServerInfo(host: Host): Pair<Host, Map<String, String>> = withContext(Dispatchers.IO) {
+    private val remoteProbeTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    suspend fun fetchServerInfo(host: Host): Pair<Host, Map<String, String>> {
+        val (resolved, metadata) = HostRouteResolver.resolve(host) { fetchServerInfoAtAddress(it) }
+        val reported = metadata["ExternalIP"]?.trim()?.takeIf { it.isNotEmpty() && it != resolved.address && it != "0.0.0.0" }
+        val port = metadata["ExternalPort"]?.toIntOrNull()?.takeIf { it in 6..65535 }
+        if (resolved.isSecurelyPaired && !resolved.serverId.isNullOrBlank() && reported != null && port != null &&
+            resolved.effectiveAddress == resolved.address && resolved.remoteAddress != reported) {
+            val now = System.currentTimeMillis()
+            val key = "${resolved.id}:$reported:$port"
+            if (now - (remoteProbeTimes[key] ?: 0L) > 60_000) {
+                remoteProbeTimes[key] = now
+                try {
+                    val verified = verifyRemoteAddress(resolved, reported, port, port - 5)
+                    return verified.copy(activeAddress = resolved.activeAddress) to metadata
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    AppLogger.debug("Reported remote endpoint could not be verified: ${e.message}", "HTTP")
+                }
+            }
+        }
+        return resolved to metadata
+    }
+
+    suspend fun verifyRemoteAddress(host: Host, address: String, httpPort: Int, httpsPort: Int): Host {
+        if (!host.isSecurelyPaired || host.serverId.isNullOrBlank()) {
+            throw HostTrustException("Pair with the host locally before saving a remote address.")
+        }
+        require(httpPort in 1..65535 && httpsPort in 1..65535) { "Ports must be between 1 and 65535" }
+        val candidate = host.copy(remoteAddress = address.trim(), remoteHTTPPort = httpPort,
+            remoteHTTPSPort = httpsPort, activeAddress = address.trim())
+        fetchServerInfoAtAddress(candidate) // Verifies pinned certificate AND server identity.
+        return candidate.copy(activeAddress = host.activeAddress)
+    }
+
+    private suspend fun fetchServerInfoAtAddress(host: Host): Pair<Host, Map<String, String>> = withContext(Dispatchers.IO) {
         val uniqueId = uniqueID()
         var responseData: String? = null
         var isHttps = false
@@ -135,12 +179,13 @@ class SunshineHTTPClient(
         if (host.isSecurelyPaired && host.httpsPort > 0) {
             try {
                 val httpsUrl = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/serverinfo?uniqueid=$uniqueId"
-                val client = getClientForHost(host)
+                val client = getClientForHost(host).newBuilder()
+                    .connectTimeout(2, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build()
                 val request = Request.Builder().url(httpsUrl).build()
                 client.newCall(request).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
-                        if (body != null) {
+                        if (body != null && parseSimpleXml(body)["status_code"].let { it == null || it == "200" }) {
                             responseData = body
                             isHttps = true
                         }
@@ -152,6 +197,9 @@ class SunshineHTTPClient(
         }
 
         // Fallback to plain HTTP serverinfo (unpinned allowed only for initial discovery/pairing status)
+        if (responseData == null && host.isSecurelyPaired) {
+            throw IOException("Authenticated connection to ${host.name} failed. Check the host is online and this device is still paired.")
+        }
         if (responseData == null) {
             val httpUrl = "http://${host.urlAddress}:${host.effectiveHTTPPort}/serverinfo?uniqueid=$uniqueId"
             val request = Request.Builder().url(httpUrl).build()
@@ -164,10 +212,19 @@ class SunshineHTTPClient(
         }
 
         val dict = parseSimpleXml(responseData!!)
+        checkProtocolResponse(dict)
+        if (dict["hostname"] == null && dict["appversion"] == null && dict["uniqueid"] == null) {
+            throw IOException("Invalid serverinfo response")
+        }
+        if (host.serverId != null && !host.serverId.equals(dict["uniqueid"], ignoreCase = true)) {
+            throw HostTrustException("The server identity changed. Check the host address.")
+        }
         val pairStatus = dict["PairStatus"]
         val isConfirmedPaired = host.isSecurelyPaired || (isHttps && pairStatus == "1")
 
+        val currentAppId = dict["currentgame"]?.toIntOrNull()?.takeIf { it != 0 }
         val status = when {
+            isConfirmedPaired && currentAppId != null -> HostStatus.STREAMING
             isConfirmedPaired -> HostStatus.ONLINE
             pairStatus == "1" -> HostStatus.ONLINE
             else -> HostStatus.PAIRING_REQUIRED
@@ -183,8 +240,12 @@ class SunshineHTTPClient(
             gfeVersion = dict["GfeVersion"] ?: host.gfeVersion,
             serverCodecModeSupport = dict["ServerCodecModeSupport"]?.toIntOrNull() ?: host.serverCodecModeSupport,
             macAddress = dict["mac"] ?: host.macAddress,
-            httpsPort = dict["HttpsPort"]?.toIntOrNull() ?: host.httpsPort,
-            httpPort = dict["HttpPort"]?.toIntOrNull() ?: host.httpPort,
+            httpsPort = if (host.effectiveAddress == host.address) dict["HttpsPort"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: host.httpsPort else host.httpsPort,
+            httpPort = host.httpPort,
+            serverId = dict["uniqueid"] ?: host.serverId,
+            currentAppId = currentAppId,
+            currentAppUUID = dict["currentgameuuid"]?.takeIf { it.isNotBlank() },
+            lastSeenEpochMs = System.currentTimeMillis(),
             capabilities = updatedCapabilities
         )
 
@@ -201,7 +262,7 @@ class SunshineHTTPClient(
             if (!response.isSuccessful) {
                 throw IOException("Applist failed with code ${response.code}")
             }
-            val body = response.body?.string() ?: return@withContext emptyList()
+            val body = response.body?.string() ?: throw IOException("Empty applist response")
             parseAppListXml(body, host)
         }
     }
@@ -247,7 +308,7 @@ class SunshineHTTPClient(
             }
         }
 
-        var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/launch?uniqueid=$uniqueId&appid=$appId&mode=$mode&additionalStates=1&sops=$sops&rikey=$rikey&rikeyid=$rikeyId&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
+        var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/launch?uniqueid=$uniqueId&appid=$appId&mode=$mode&additionalStates=1&sops=$sops&rikey=$rikey&rikeyid=${Integer.toUnsignedString(rikeyId)}&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
         if (!appUUID.isNullOrEmpty() && isValidUuid(appUUID)) {
             url += "&appuuid=$appUUID"
         }
@@ -294,7 +355,7 @@ class SunshineHTTPClient(
             }
         }
 
-        var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/resume?uniqueid=$uniqueId&rikey=$rikey&rikeyid=$rikeyId&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
+        var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/resume?uniqueid=$uniqueId&rikey=$rikey&rikeyid=${Integer.toUnsignedString(rikeyId)}&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
         url += buildLaunchQuery(settings, host)
         if (extraParams.isNotEmpty()) {
             url += extraParams
@@ -324,7 +385,10 @@ class SunshineHTTPClient(
         val request = Request.Builder().url(url).build()
         try {
             client.newCall(request).execute().use { response ->
-                response.isSuccessful
+                if (!response.isSuccessful) return@withContext false
+                val values = parseSimpleXml(response.body?.string().orEmpty())
+                checkProtocolResponse(values)
+                true
             }
         } catch (e: Exception) {
             false
@@ -336,7 +400,10 @@ class SunshineHTTPClient(
         val url = "http://${host.urlAddress}:${host.effectiveHTTPPort}/unpair?uniqueid=$uniqueId"
         try {
             baseHttpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                response.isSuccessful
+                if (!response.isSuccessful) return@withContext false
+                val values = parseSimpleXml(response.body?.string().orEmpty())
+                checkProtocolResponse(values)
+                true
             }
         } catch (e: Exception) {
             false
@@ -540,6 +607,13 @@ class SunshineHTTPClient(
     }
 
     companion object {
+        fun checkProtocolResponse(values: Map<String, String>) {
+            val status = values["status_code"] ?: return
+            if (status.toIntOrNull() !in 200..299) {
+                throw IOException(values["status_message"] ?: "Host request failed ($status)")
+            }
+        }
+
         /**
          * Builds launch query parameters.
          * Matches HostLaunchOptions.swift:4-18
@@ -641,11 +715,13 @@ class SunshineHTTPClient(
         }
 
         fun parseAppListXml(xml: String, host: Host): List<StreamApp> {
+            checkProtocolResponse(parseSimpleXml(xml))
             val apps = mutableListOf<StreamApp>()
             try {
                 val factory = DocumentBuilderFactory.newInstance()
                 val builder = factory.newDocumentBuilder()
                 val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+                if (doc.documentElement.tagName != "root") throw IOException("Invalid applist response")
                 val appNodes = doc.getElementsByTagName("App")
                 val nodesToProcess = if (appNodes.length > 0) appNodes else doc.getElementsByTagName("app")
                 for (i in 0 until nodesToProcess.length) {
@@ -680,7 +756,7 @@ class SunshineHTTPClient(
                     )
                 }
             } catch (e: Exception) {
-                AppLogger.error("Failed to parse applist XML: ${e.message}", "HTTP")
+                throw IOException("Failed to parse applist XML", e)
             }
             return apps
         }

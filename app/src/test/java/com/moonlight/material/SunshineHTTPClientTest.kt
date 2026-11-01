@@ -51,4 +51,28 @@ class SunshineHTTPClientTest {
         assertEquals("rtsp://192.168.1.100:48010", dict["sessionUrl0"])
         assertEquals("1", dict["gamesession"])
     }
+
+    @Test(expected = java.io.IOException::class)
+    fun appListRejectsProtocolErrorInsteadOfReturningEmpty() {
+        SunshineHTTPClient.parseAppListXml(
+            "<root status_code=\"401\" status_message=\"Client not authorized\"/>",
+            com.moonlight.material.core.models.Host(name = "PC", address = "localhost")
+        )
+    }
+
+    @Test(expected = java.io.IOException::class)
+    fun malformedAppListDoesNotEraseCatalogue() {
+        SunshineHTTPClient.parseAppListXml(
+            "<html>error</html>",
+            com.moonlight.material.core.models.Host(name = "PC", address = "localhost")
+        )
+    }
+
+    @Test
+    fun validEmptyCatalogueIsAccepted() {
+        assertTrue(SunshineHTTPClient.parseAppListXml(
+            "<root status_code=\"200\"/>",
+            com.moonlight.material.core.models.Host(name = "PC", address = "localhost")
+        ).isEmpty())
+    }
 }

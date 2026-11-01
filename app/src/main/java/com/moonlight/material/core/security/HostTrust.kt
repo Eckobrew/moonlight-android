@@ -1,14 +1,17 @@
 package com.moonlight.material.core.security
 
 import java.io.ByteArrayInputStream
-import java.security.KeyStore
 import java.security.Signature
 import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.Arrays
 import java.util.Base64
-import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.X509ExtendedKeyManager
+import javax.net.ssl.SSLEngine
+import java.net.Socket
+import java.security.Principal
+import java.security.PrivateKey
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
@@ -105,15 +108,23 @@ object HostTrust {
 
         // Send client identity ONLY when a pinned certificate exists (HostTrust.swift:107)
         val keyManagers = if (pinnedCertificateDER != null && clientCert != null && clientKey != null) {
-            val keyStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
-                load(null, null)
-                setCertificateEntry("cert", clientCert)
-                setKeyEntry("key", clientKey, "".toCharArray(), arrayOf(clientCert))
-            }
-            val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply {
-                init(keyStore, "".toCharArray())
-            }
-            kmf.keyManagers
+            // GameStream pairs a self-signed leaf certificate. Its CertificateRequest
+            // issuer list is not a CA chain for our identity, so Android's default
+            // key manager may omit the paired client certificate entirely.
+            arrayOf(object : X509ExtendedKeyManager() {
+                override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?) =
+                    if (keyType == "RSA") arrayOf("moonlight") else null
+                override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?) =
+                    if (keyType?.contains("RSA") == true) "moonlight" else null
+                override fun chooseEngineClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, engine: SSLEngine?) =
+                    if (keyType?.contains("RSA") == true) "moonlight" else null
+                override fun getCertificateChain(alias: String?) =
+                    if (alias == "moonlight") arrayOf(clientCert) else null
+                override fun getPrivateKey(alias: String?): PrivateKey? =
+                    if (alias == "moonlight") clientKey else null
+                override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? = null
+                override fun chooseServerAlias(keyType: String?, issuers: Array<out Principal>?, socket: Socket?): String? = null
+            })
         } else {
             null
         }
