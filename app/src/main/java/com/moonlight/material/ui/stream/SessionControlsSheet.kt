@@ -1,6 +1,7 @@
 package com.moonlight.material.ui.stream
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -27,6 +28,9 @@ fun SessionControlsSheet(
     session: StreamSessionController,
     app: StreamApp,
     onShowKeyboard: () -> Unit,
+    controllerVisible: Boolean,
+    controllerConnected: Boolean,
+    onToggleController: () -> Unit,
     onTouchModeChanged: (Boolean) -> Unit,
     onFinish: () -> Unit,
     onDismiss: () -> Unit
@@ -40,6 +44,8 @@ fun SessionControlsSheet(
     val showHostStats by session.showHostStatistics.collectAsState()
     val hostControlMessage by session.hostControlMessage.collectAsState()
     val activeHost = session.activeHost
+    val controlButtonColors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
+    val controlButtonBorder = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.45f))
 
     var commandsMenuExpanded by remember { mutableStateOf(false) }
     var showQuitConfirmDialog by remember { mutableStateOf(false) }
@@ -100,7 +106,7 @@ fun SessionControlsSheet(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
+                colors = controlButtonColors, border = controlButtonBorder
             ) {
                 Icon(Icons.Default.Keyboard, contentDescription = null)
                 Spacer(modifier = Modifier.width(10.dp))
@@ -113,16 +119,41 @@ fun SessionControlsSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("Touch Input Mode", color = TextPrimary, fontWeight = FontWeight.Medium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !touchpadMode, onClick = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
                     session.setTouchpadMode(false)
                     onTouchModeChanged(false)
-                }, label = { Text("Touchscreen") })
-                FilterChip(selected = touchpadMode, onClick = {
+                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
+                    colors = controlButtonColors, border = controlButtonBorder) {
+                    Text(if (!touchpadMode) "✓ Touchscreen" else "Touchscreen")
+                }
+                OutlinedButton(onClick = {
                     session.setTouchpadMode(true)
                     onTouchModeChanged(true)
-                }, label = { Text("Touchpad") })
+                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
+                    colors = controlButtonColors, border = controlButtonBorder) {
+                    Text(if (touchpadMode) "✓ Touchpad" else "Touchpad")
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = { session.togglePerformanceOverlay() },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = controlButtonColors, border = controlButtonBorder
+            ) { Text(if (showHUD) "Hide Performance HUD" else "Show Performance HUD") }
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = { onToggleController(); onDismiss() },
+                enabled = !controllerConnected,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = controlButtonColors, border = controlButtonBorder
+            ) {
+                Text(if (controllerConnected) "Gamepad hidden: physical controller connected"
+                    else if (controllerVisible) "Hide On-screen Gamepad" else "Show On-screen Gamepad")
             }
             Spacer(Modifier.height(12.dp))
 
@@ -200,23 +231,6 @@ fun SessionControlsSheet(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-
-            // Show HUD toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text("Performance HUD", color = TextPrimary, fontWeight = FontWeight.Medium)
-                    Text("Monospace text metrics in top right", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                }
-                Switch(
-                    checked = showHUD,
-                    onCheckedChange = { session.togglePerformanceOverlay() },
-                    colors = SwitchDefaults.colors(checkedThumbColor = DeepNavy, checkedTrackColor = CyanAccent)
-                )
-            }
 
             // Include Host Statistics toggle (if supported)
             if (activeHost?.capabilities?.hardwareMetricsVersion == 1) {
