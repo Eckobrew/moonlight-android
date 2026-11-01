@@ -1,6 +1,7 @@
 package com.moonlight.material.ui.stream
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -273,6 +274,7 @@ fun SessionControlsSheet(
                     onFinish()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CardNavy),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -291,6 +293,7 @@ fun SessionControlsSheet(
                 onClick = { showQuitConfirmDialog = true },
                 enabled = !isQuitting,
                 colors = ButtonDefaults.buttonColors(containerColor = RoseError.copy(alpha = 0.9f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
