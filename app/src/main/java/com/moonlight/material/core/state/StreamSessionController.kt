@@ -194,10 +194,10 @@ class StreamSessionController(
                 if (!_isStreaming.value || sessionGeneration != generation) return@launch
                 activeHost = updatedHost
 
-                // Launch or Resume decision matching StreamSessionController.swift:339-355
+                // Launch or Resume decision matching StreamSessionController.swift:301, 339, 359
+                preserveHostApplication = app.control == com.moonlight.material.core.models.AppControl.RESUME
                 val sessionUrl: String?
-                if (app.matchesRunning(updatedHost) || app.control?.id == 1) {
-                    preserveHostApplication = true
+                if (app.matchesRunning(updatedHost) || app.control == com.moonlight.material.core.models.AppControl.RESUME) {
                     sessionUrl = httpClient.resumeApp(
                         host = updatedHost,
                         settings = settings,
@@ -205,7 +205,7 @@ class StreamSessionController(
                         rikeyId = rikeyId
                     )
                 } else {
-                    preserveHostApplication = false
+                    didLaunchHostApp = !app.matchesRunning(updatedHost) && !isRemoteMonitorSession
                     sessionUrl = httpClient.launchApp(
                         host = updatedHost,
                         appId = app.id,
@@ -214,7 +214,6 @@ class StreamSessionController(
                         rikey = rikeyHex,
                         rikeyId = rikeyId
                     )
-                    didLaunchHostApp = true
                 }
 
                 if (!_isStreaming.value || sessionGeneration != generation) return@launch

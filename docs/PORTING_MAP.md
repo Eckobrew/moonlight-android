@@ -104,9 +104,9 @@ Status Definitions:
 | `Networking/Discovery/BonjourDiscoveryService.swift` | `networking/BonjourDiscoveryService.kt` | ported | Android `NsdManager` mDNS discovery for `_nvstream._tcp`. |
 | `Networking/Discovery/WakeOnLAN.swift` | `networking/WakeOnLAN.kt` | ported | UDP broadcast of magic packet on ports 7 and 9. |
 | `Networking/HTTP/HostControlClient.swift` | `networking/HostControlClient.kt` | not started | Milestone M7: Host commands, stats endpoint, runtime bitrate. |
-| `Networking/HTTP/HostLaunchOptions.swift` | `networking/SunshineHTTPClient.kt` | ported | Query parameters for virtual display, controller masks, HDR. |
-| `Networking/HTTP/PairingService.swift` | `networking/PairingService.kt` | ported | 5-stage cryptographic handshake with PIN challenge. |
-| `Networking/HTTP/SunshineHTTPClient.swift` | `networking/SunshineHTTPClient.kt` | ported | Authenticated pinned HTTPS requests for serverinfo, launch, resume. |
+| `Networking/HTTP/HostLaunchOptions.swift` | `networking/SunshineHTTPClient.kt` | ported | Milestone M2: Query parameters for virtual display, unsigned controller masks, HDR. |
+| `Networking/HTTP/PairingService.swift` | `networking/PairingService.kt` | ported | Milestone M2: 5-stage cryptographic handshake with PIN challenge and fail-closed HTTPS. |
+| `Networking/HTTP/SunshineHTTPClient.swift` | `networking/SunshineHTTPClient.kt` | ported | Milestone M2: Authenticated pinned HTTPS requests for serverinfo, launch (with common-c extra params & appuuid validation), resume. |
 | `Networking/NetworkReachability.swift` | `networking/NetworkReachability.kt` | not started | Milestone M7: STUN probing and remote candidate verification. |
 | `Networking/TCPProbe.swift` | `networking/TCPProbe.kt` | ported | Low-timeout TCP socket probe for RTSP reachability. |
 
@@ -161,7 +161,7 @@ Status Definitions:
 | `UI/Stream/StreamNegotiationView.swift` | `ui/stream/StreamingScreen.kt` | ported | Stage progress indicator during connection. |
 | `UI/Stream/StreamingSessionView.swift` | `ui/stream/StreamingScreen.kt` | ported | SurfaceView container with gesture and controller routing. |
 
-## 10. Native Layer & Vendored Reference Dependencies
+## 11. Native Layer & Vendored Reference Dependencies
 
 | Reference File / Module | Android Port Target(s) | Status | Porting Notes |
 | :--- | :--- | :--- | :--- |

@@ -68,6 +68,8 @@ data class StreamApp(
         if (!host.currentAppUUID.isNullOrEmpty() && !uuid.isNullOrEmpty()) {
             return host.currentAppUUID.equals(uuid, ignoreCase = true)
         }
-        return host.currentAppId == id
+        val hostAppId = host.currentAppId ?: return false
+        if (hostAppId == 0) return false
+        return hostAppId == id
     }
 }

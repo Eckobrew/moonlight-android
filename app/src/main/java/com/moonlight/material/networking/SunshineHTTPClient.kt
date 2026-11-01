@@ -235,14 +235,23 @@ class SunshineHTTPClient(
         val surroundAudioInfo = settings.audioMode.surroundAudioInfo
         val localAudioPlayMode = if (settings.muteHostAudio) 0 else 1
         val sops = if (settings.optimizeGameSettings) "1" else "0"
+        val extraParams = if (commonCExtraParams.isNotEmpty()) {
+            commonCExtraParams
+        } else {
+            try {
+                com.moonlight.material.bridge.MoonBridge.getLaunchUrlQueryParameters()
+            } catch (t: Throwable) {
+                ""
+            }
+        }
 
         var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/launch?uniqueid=$uniqueId&appid=$appId&mode=$mode&additionalStates=1&sops=$sops&rikey=$rikey&rikeyid=$rikeyId&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
         if (!appUUID.isNullOrEmpty() && isValidUuid(appUUID)) {
             url += "&appuuid=$appUUID"
         }
         url += buildLaunchQuery(settings, host)
-        if (commonCExtraParams.isNotEmpty()) {
-            url += commonCExtraParams
+        if (extraParams.isNotEmpty()) {
+            url += extraParams
         }
 
         AppLogger.info("Launching app $appId on ${host.name} ($mode)", "HTTP")
@@ -277,11 +286,20 @@ class SunshineHTTPClient(
         val surroundAudioInfo = settings.audioMode.surroundAudioInfo
         val localAudioPlayMode = if (settings.muteHostAudio) 0 else 1
         val sops = if (settings.optimizeGameSettings) "1" else "0"
+        val extraParams = if (commonCExtraParams.isNotEmpty()) {
+            commonCExtraParams
+        } else {
+            try {
+                com.moonlight.material.bridge.MoonBridge.getLaunchUrlQueryParameters()
+            } catch (t: Throwable) {
+                ""
+            }
+        }
 
         var url = "https://${host.urlAddress}:${host.effectiveHTTPSPort}/resume?uniqueid=$uniqueId&mode=$mode&additionalStates=1&sops=$sops&rikey=$rikey&rikeyid=$rikeyId&localAudioPlayMode=$localAudioPlayMode&surroundAudioInfo=$surroundAudioInfo"
         url += buildLaunchQuery(settings, host)
-        if (commonCExtraParams.isNotEmpty()) {
-            url += commonCExtraParams
+        if (extraParams.isNotEmpty()) {
+            url += extraParams
         }
 
         AppLogger.info("Resuming session on ${host.name} ($mode)", "HTTP")
@@ -327,26 +345,27 @@ class SunshineHTTPClient(
         }
     }
 
-    /**
-     * Builds launch query parameters.
-     * Matches HostLaunchOptions.swift:4-18
-     */
-    private fun buildLaunchQuery(settings: StreamSettings, host: Host): String {
-        var query = "&remoteControllersBitmap=${settings.controllerMask}&gcmap=${settings.controllerMask}&gcpersist=${if (settings.features.persistentGamepad) 1 else 0}"
-        if (host.capabilities?.virtualDisplayCapable == true) {
-            when (settings.features.virtualDisplayMode) {
-                com.moonlight.material.core.models.VirtualDisplayMode.HOST_DEFAULT -> {}
-                com.moonlight.material.core.models.VirtualDisplayMode.VIRTUAL -> query += "&virtualDisplay=1"
-                com.moonlight.material.core.models.VirtualDisplayMode.PHYSICAL -> query += "&virtualDisplay=0"
-            }
-        }
-        if (settings.enableHdr) {
-            query += "&hdrMode=1&clientHdrCapVersion=0&clientHdrCapSupportedFlagsInUint32=0&clientHdrCapMetaDataId=NV_STATIC_METADATA_TYPE_1&clientHdrCapDisplayData=0x0x0x0x0x0x0x0x0x0x0"
-        }
-        return query
-    }
-
     companion object {
+        /**
+         * Builds launch query parameters.
+         * Matches HostLaunchOptions.swift:4-18
+         */
+        fun buildLaunchQuery(settings: StreamSettings, host: Host? = null): String {
+            val mask = java.lang.Short.toUnsignedInt(settings.controllerMask)
+            var query = "&remoteControllersBitmap=$mask&gcmap=$mask&gcpersist=${if (settings.features.persistentGamepad) 1 else 0}"
+            if (host?.capabilities?.virtualDisplayCapable == true) {
+                when (settings.features.virtualDisplayMode) {
+                    com.moonlight.material.core.models.VirtualDisplayMode.HOST_DEFAULT -> {}
+                    com.moonlight.material.core.models.VirtualDisplayMode.VIRTUAL -> query += "&virtualDisplay=1"
+                    com.moonlight.material.core.models.VirtualDisplayMode.PHYSICAL -> query += "&virtualDisplay=0"
+                }
+            }
+            if (settings.enableHdr) {
+                query += "&hdrMode=1&clientHdrCapVersion=0&clientHdrCapSupportedFlagsInUint32=0&clientHdrCapMetaDataId=NV_STATIC_METADATA_TYPE_1&clientHdrCapDisplayData=0x0x0x0x0x0x0x0x0x0x0"
+            }
+            return query
+        }
+
         fun isValidUuid(uuidString: String): Boolean {
             return try {
                 UUID.fromString(uuidString)
