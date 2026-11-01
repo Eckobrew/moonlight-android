@@ -4,6 +4,8 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
 import android.view.Surface
 import com.moonlight.material.bridge.MoonBridge
 import com.moonlight.material.core.utils.AppLogger
@@ -66,17 +68,11 @@ class MediaCodecDecoder(
         private set
     var totalFramesDropped: Long = 0
         private set
-    var currentFps: Double = 0.0
-        private set
-    var averageDecodeTimeMs: Double = 0.0
-        private set
-
-    private var fpsFrameCount: Int = 0
-    private var lastFpsTimestampMs: Long = 0L
-    private var totalDecodeTimeMs: Double = 0.0
-    private var decodeTimeCount: Long = 0
+    val currentFps: Double get() = performance.snapshot().renderedFps
+    val averageDecodeTimeMs: Double get() = performance.snapshot().decodeTimeMs
 
     private val decoderLock = Any()
+    val performance = VideoPerformanceTracker()
 
     fun setup(videoFormat: Int, width: Int, height: Int, redrawRate: Int): Int {
         synchronized(decoderLock) {
@@ -100,6 +96,7 @@ class MediaCodecDecoder(
             baseTimestampUs = 0L
             lastTimestampUs = 0L
             lastFrameNumber = 0
+            performance.reset()
 
             return initializeDecoder()
         }
@@ -134,6 +131,9 @@ class MediaCodecDecoder(
             val codec = MediaCodec.createDecoderByType(mimeType)
             codec.configure(format, surface, null, 0)
             codec.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+            codec.setOnFrameRenderedListener({ source, _, renderTimeNs ->
+                if (source === videoDecoder && !isStopping.get()) performance.renderedFrame(renderTimeNs)
+            }, Handler(Looper.getMainLooper()))
             codec.start()
 
             videoDecoder = codec
@@ -235,8 +235,6 @@ class MediaCodecDecoder(
             return MoonBridge.DR_OK
         }
 
-        totalFramesReceived++
-
         // Missing frame detection
         if (lastFrameNumber != 0 && frameNumber > lastFrameNumber + 1) {
             val lost = frameNumber - lastFrameNumber - 1
@@ -271,6 +269,8 @@ class MediaCodecDecoder(
             }
         }
 
+        performance.receivedFrame(frameNumber)
+        totalFramesReceived++
         val codec = videoDecoder ?: return MoonBridge.DR_NEED_IDR
 
         try {
@@ -296,6 +296,7 @@ class MediaCodecDecoder(
             if (inputBufferIndex < 0) {
                 AppLogger.warn("Decoder input buffer starved, requesting IDR frame", TAG)
                 totalFramesDropped++
+                performance.droppedDecoderFrame()
                 listener?.onFrameDropped()
                 MoonBridge.requestIdrFrame()
                 return MoonBridge.DR_NEED_IDR
@@ -331,6 +332,7 @@ class MediaCodecDecoder(
                 flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
             }
 
+            performance.queuedFrame(ptsUs)
             codec.queueInputBuffer(inputBufferIndex, 0, length, ptsUs, flags)
             return MoonBridge.DR_OK
         } catch (e: Exception) {
@@ -377,34 +379,24 @@ class MediaCodecDecoder(
                     val outIndex = codec.dequeueOutputBuffer(bufferInfo, 30000L) // 30ms timeout
 
                     if (outIndex >= 0) {
-                        // Calculate actual decode latency
-                        val nowMs = SystemClock.uptimeMillis()
-                        val ptsMs = bufferInfo.presentationTimeUs / 1000L
-                        val deltaMs = (nowMs - ptsMs).toDouble()
-
-                        if (deltaMs in 0.0..1000.0) {
-                            totalDecodeTimeMs += deltaMs
-                            decodeTimeCount++
-                            averageDecodeTimeMs = totalDecodeTimeMs / decodeTimeCount
-                            listener?.onFrameDecoded(deltaMs)
+                        val isFrame = bufferInfo.flags and
+                            (MediaCodec.BUFFER_FLAG_CODEC_CONFIG or MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0
+                        if (isFrame) {
+                            val decodeMs = performance.decodedFrame(bufferInfo.presentationTimeUs)
+                            // Count outputs regardless of whether a matching input timestamp exists.
+                            listener?.onFrameDecoded(decodeMs ?: 0.0)
                         }
-
-                        // Pace output buffer release
                         val releaseTimestampNs = pacer.calculateReleaseTimeNs()
                         codec.releaseOutputBuffer(outIndex, releaseTimestampNs)
-                        totalFramesRendered++
-
-                        // Track FPS
-                        fpsFrameCount++
-                        if (nowMs - lastFpsTimestampMs >= 1000L) {
-                            currentFps = (fpsFrameCount * 1000.0) / (nowMs - lastFpsTimestampMs)
-                            fpsFrameCount = 0
-                            lastFpsTimestampMs = nowMs
-                        }
+                        if (isFrame) totalFramesRendered++
                     } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val newFormat = codec.outputFormat
-                        val width = newFormat.getInteger(MediaFormat.KEY_WIDTH)
-                        val height = newFormat.getInteger(MediaFormat.KEY_HEIGHT)
+                        val width = if (newFormat.containsKey("crop-right") && newFormat.containsKey("crop-left"))
+                            newFormat.getInteger("crop-right") - newFormat.getInteger("crop-left") + 1
+                            else newFormat.getInteger(MediaFormat.KEY_WIDTH)
+                        val height = if (newFormat.containsKey("crop-bottom") && newFormat.containsKey("crop-top"))
+                            newFormat.getInteger("crop-bottom") - newFormat.getInteger("crop-top") + 1
+                            else newFormat.getInteger(MediaFormat.KEY_HEIGHT)
                         AppLogger.info("MediaCodec output format changed: ${width}x${height}", TAG)
                         listener?.onFormatChanged(width, height)
                     } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {

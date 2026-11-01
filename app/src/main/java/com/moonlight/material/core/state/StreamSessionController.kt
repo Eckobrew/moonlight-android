@@ -133,13 +133,6 @@ class StreamSessionController(
     private var negotiatedFps: Int? = null
     private var negotiatedCodec: String? = null
 
-    private var totalFramesDecoded = 0
-    private var droppedFramesCount = 0
-    private var lastFpsSampleTime = 0L
-    private var framesInSample = 0
-    private var measuredFps: Double = 0.0
-    private var lastDecodeTimeMs: Double = 0.0
-
     fun togglePerformanceOverlay() {
         _showPerformanceOverlay.value = !_showPerformanceOverlay.value
     }
@@ -249,9 +242,6 @@ class StreamSessionController(
                 negotiatedHeight = null
                 negotiatedFps = null
                 negotiatedCodec = null
-                totalFramesDecoded = 0
-                droppedFramesCount = 0
-                measuredFps = 0.0
                 onSessionStarted?.invoke()
 
                 // Generate 16-byte random key for remote input AES encryption
@@ -438,6 +428,7 @@ class StreamSessionController(
                 val rttMs = if (rttLong >= 0) (rttLong ushr 32).toDouble() else 0.0
                 val rttVarMs = if (rttLong >= 0) (rttLong and 0xFFFFFFFFL).toDouble() else 0.0
 
+                val video = videoDecoder?.performance?.snapshot()
                 val settings = activeSettings
                 val currentWidth = negotiatedWidth ?: settings?.width ?: 1920
                 val currentHeight = negotiatedHeight ?: settings?.height ?: 1080
@@ -446,21 +437,24 @@ class StreamSessionController(
 
                 withContext(Dispatchers.Main) {
                     _metrics.value = PerformanceMetrics(
-                        currentFps = measuredFps,
+                        currentFps = video?.renderedFps ?: 0.0,
+                        receivedFps = video?.receivedFps ?: 0.0,
+                        decodedFps = video?.decodedFps ?: 0.0,
+                        decoderDroppedFrames = video?.decoderDroppedFrames ?: 0,
                         targetFps = targetFps,
-                        decodeTimeMs = lastDecodeTimeMs,
+                        decodeTimeMs = video?.decodeTimeMs ?: 0.0,
                         roundTripTimeMs = rttMs,
                         roundTripTimeVarianceMs = rttVarMs,
                         bitrateMbps = _runtimeBitrateKbps.value / 1000.0,
                         packetLossPercentage = 0.0,
-                        networkDroppedFrames = droppedFramesCount,
+                        networkDroppedFrames = video?.networkDroppedFrames ?: 0,
                         currentCodec = currentCodec,
                         resolution = "${currentWidth}x${currentHeight}",
                         vsyncEnabled = settings?.enableVsync ?: true,
                         pacingEnabled = settings?.enableFramePacing ?: true
                     )
                 }
-                delay(1000)
+                delay(250)
             }
         }
     }
@@ -806,22 +800,14 @@ class StreamSessionController(
     // --- VideoDecoderListener ---
 
     override fun onFrameDecoded(decodeTimeMs: Double) {
-        totalFramesDecoded++
-        framesInSample++
-        lastDecodeTimeMs = decodeTimeMs
-
-        val now = System.currentTimeMillis()
-        if (lastFpsSampleTime == 0L) {
-            lastFpsSampleTime = now
-        } else if (now - lastFpsSampleTime >= 1000) {
-            measuredFps = (framesInSample * 1000.0) / (now - lastFpsSampleTime)
-            framesInSample = 0
-            lastFpsSampleTime = now
-        }
+        // Metrics are sampled atomically from the decoder's monotonic tracker.
     }
 
-    override fun onFrameDropped() {
-        droppedFramesCount++
+    override fun onFrameDropped() { }
+
+    override fun onFormatChanged(width: Int, height: Int) {
+        negotiatedWidth = width
+        negotiatedHeight = height
     }
 
     override fun onDecoderError(error: String) {

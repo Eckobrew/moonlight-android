@@ -5,6 +5,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class PerformanceMetrics(
     val currentFps: Double = 0.0,
+    val receivedFps: Double = 0.0,
+    val decodedFps: Double = 0.0,
+    val decoderDroppedFrames: Int = 0,
     val targetFps: Int = 60,
     val decodeTimeMs: Double = 0.0,
     val roundTripTimeMs: Double = 0.0,
