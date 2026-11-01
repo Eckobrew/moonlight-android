@@ -1,102 +1,127 @@
-# Moonlight for Android (Material Design)
+# Moonlight for Android — Material
 
-A modern native Android game-streaming client recreating [Moonlight for macOS](http://github.com/eckobrew/moonlight-mac) with a full Material 3 UI and feature parity for PCs running [Sunshine](https://github.com/LizardByte/Sunshine) or [Apollo](https://github.com/ClassicOldSong/Apollo).
+Stream games and your Windows desktop from your PC to an Android phone or tablet, with a Material 3 interface.
 
-Built with **Jetpack Compose**, **Material Design 3**, **Hardware MediaCodec**, and **AudioTrack** with low latency.
+This is Eckobrew's Android client inspired by [Moonlight for macOS](https://github.com/eckobrew/moonlight-mac). It uses Moonlight's streaming core and works with [Sunshine](https://github.com/LizardByte/Sunshine) and compatible hosts such as [Apollo](https://github.com/ClassicOldSong/Apollo).
 
----
+**Development preview:** the interface and streaming features are still being refined. Available options depend on your phone, controller, network and host software.
 
-## Features & Parity with `moonlight-mac`
+## What you need
 
-| Feature | Android Material Implementation | `moonlight-mac` Reference |
-| :--- | :--- | :--- |
-| **Material 3 UI** | Full Material 3 theming (Dark & Light, gaming Cyan/Deep Navy palette), adaptive host & app grids, bottom sheets, segmented buttons, sliders | SwiftUI interface |
-| **Video Decoding** | Hardware-accelerated `android.media.MediaCodec` (H.264, HEVC, AV1) with zero-copy `SurfaceView`, CSD/OBU parameter parsing, HDR10 static metadata InfoFrames, and refresh-rate aligned frame pacing | VideoToolbox decoder |
-| **Audio Engine** | Multi-stream Opus decoding with low-latency `android.media.AudioTrack` supporting Stereo, 5.1 Surround, and 7.1 Surround, featuring dynamic buffer thresholds and underrun linear fading | AVAudioEngine / CoreAudio |
-| **Display Modes** | Native screen resolution detection, 720p, 1080p, 1440p, 4K UHD, and Custom resolutions up to 8192x8192 | DisplayManager & custom resolutions |
-| **Frame Rates** | 30, 60, 90, 120, 144, 240 FPS and custom frame rates | 1–500 FPS selector |
-| **Bitrate Controls** | 0.5 to 150 Mbps slider with live runtime bitrate adjustment via `/bitrate` extension endpoint | Local & Remote bitrate options |
-| **Cryptographic Pairing** | 5-Stage PIN pairing with SHA256 key derivation, AES-128 challenge, RSA server secret signature verification, and fail-closed mTLS certificate pinning | PairingService & HostTrust |
-| **Certificate Pinning** | Host certificates pinned byte-for-byte in DER format; HTTPS connections without pinned certificate fail closed | SecTrust certificate pinning |
-| **Input & Gamepads** | Physical controllers (Xbox, DualSense, Switch Pro) with multi-controller slots, haptics, face button swap (Nintendo layout) | GCController input manager |
-| **Touch Controller** | On-screen virtual touch overlay: Dual analog joysticks, D-Pad, A/B/X/Y, LB/RB, LT/RT, Select/Start with adjustable opacity | Mobile touch overlay |
-| **Gamepad Mouse Emulation** | Hold Start for 1 second to toggle pointer emulation with gamepad thumbstick | Gamepad mouse control |
-| **Touchpad & Direct Touch** | 1-finger relative cursor, tap to click, 2-finger tap right click, 2-finger scroll with subpixel accumulation | Desktop mouse mode |
-| **Physical Mouse & Keyboard** | Pointer capture (`requestPointerCapture`), relative mouse delta, discrete 120-unit wheel ticks, full Windows Virtual Key (VK) translation with left/right modifiers and extended keys | KeycodeMappings & grab |
-| **Wake-on-LAN & Sleep** | Multi-destination UDP broadcast (ports 7 & 9) with serverinfo polling resolution, and two-stage single-use SleepToken host sleep | WakeOnLAN service & HostWakeConnection |
-| **mDNS Host Discovery** | Local network discovery of `_nvstream._tcp` services using `NsdManager` | Bonjour discovery |
-| **Performance HUD** | Minimalist high-legibility text-only overlay in the top-right corner displaying FPS, decode time, RTT, variation, live bitrate, packet loss, and host CPU/GPU metrics | PerformanceHUDView |
-| **Session Controls** | Live runtime bitrate adjustment, host hardware metrics toggle, server command execution, remote monitor release, and stream termination | SessionControlsView |
-| **Per-Game Settings** | Custom resolution, frame rate, bitrate, and codec overrides per individual game | PerAppSettingsSheet |
-| **Box Art Management** | Asynchronous artwork download and caching via Coil with placeholder fallback | BoxArtManager & app asset |
-| **Clipboard Sync** | Clipboard synchronization between Android and Sunshine/Apollo | ClipboardSyncManager |
-| **Diagnostic Log Viewer** | Searchable and filterable in-app live log viewer with copy and clear actions | LogViewerSheet |
-| **Localization** | Multi-language support: English, German (Deutsch), French (Français), Spanish (Español) | Bundled lproj strings |
+- Android 8.0 or newer.
+- A PC running Sunshine or a compatible streaming host, with at least one application or Desktop configured.
+- A good connection between the PC and your Android device. Start with both on the same local network; wired Ethernet for the PC is helpful.
 
----
+## Install
 
-## Project Structure
+Download a development APK from [Android Build](https://github.com/eckobrew/moonlight-android/actions/workflows/android.yml):
 
+1. Open the latest successful build of `master`.
+2. Download **Moonlight-Material-APK** from its artifacts. Sign in to GitHub if prompted.
+3. Extract the ZIP and open `app-debug.apk` on your Android device.
+4. Allow installation from your browser or file manager when Android asks.
+
+This Material client uses the package ID `com.eckobrew.moonlight_android`. Older builds of the previous client in this repository's Releases are a different app; use the Material build above.
+
+## Connect to your PC
+
+1. Open Sunshine on your PC and make sure it is running.
+2. Open Moonlight. PCs on the same network should appear automatically.
+3. If your PC is missing, use **+** to enter its local IP address or hostname.
+4. Select the PC and start pairing. Enter the PIN shown on your phone in Sunshine's pairing page.
+5. Open the paired PC and choose Desktop or a game.
+
+If a PC is shown as offline, check its address and firewall, or wake it using Wake-on-LAN if supported and configured.
+
+## While streaming
+
+Use the **Android back gesture or Back button** to open the stream menu.
+
+- **Show On-Screen Keyboard:** type directly on the PC using your phone's keyboard.
+- **Touchscreen:** forward native touch gestures to a supported host. Other hosts fall back to mouse input.
+- **Touchpad:** move the mouse pointer with relative finger movements.
+- **Show On-screen Gamepad:** toggle virtual controls. They hide automatically when a USB or Bluetooth gamepad is connected.
+- **Performance HUD:** show rendered FPS, resolution/codec, decode timing and network latency.
+- **Disconnect Stream:** return to Moonlight and leave the host application running for Resume.
+- **Quit Game:** stop the application on the PC after confirmation.
+
+The menu also contains bitrate controls and any additional commands supported by your host. Live bitrate changes require host support.
+
+## Picture and performance settings
+
+Open Settings from the PC list or beside Refresh on the games screen.
+
+- Choose 720p, 1080p, 1440p, 4K, or **Native** to request your phone's landscape resolution. Video keeps its aspect ratio instead of stretching.
+- Choose a frame rate, including a separate **144 FPS** option. Actual rendered FPS depends on the display, decoder, host and network.
+- Start with H.264 or Auto. HEVC, AV1, HDR and advanced colour modes need compatible hardware and host support.
+- Lower the bitrate if you see stuttering, latency or network-quality warnings.
+- Use the settings icon on a game for per-game overrides.
+
+Native requests the stream size. Changing the Windows desktop itself also depends on the host's display configuration; a virtual display may be needed to match a phone's aspect ratio.
+
+## Add a game to your home screen
+
+Select the shortcut icon on a game card to open the artwork picker:
+
+1. Use the host's box art, search online, or browse for an image on your phone.
+2. Preview a squircle, circle, logo cutout or box-art icon.
+3. Choose crop/fit and a blurred, dark, black or transparent backdrop where available.
+4. Tap **Add to Home Screen** and confirm with your launcher.
+
+Steam artwork works without an API key. An optional SteamGridDB key enables additional community artwork. Your launcher may apply its own icon mask.
+
+Shortcuts resolve the current saved PC, application and settings when opened. They can wake a configured sleeping PC, use a verified remote route, and apply current per-game settings. Recreating the same host/game shortcut updates its icon and target instead of assigning a new identity.
+
+## Remote streaming
+
+Set up the host and router for remote streaming using your host software's networking instructions.
+
+While the phone is on the PC's physical local Wi-Fi/Ethernet subnet, Moonlight automatically discovers a remote-address candidate and checks it against the paired host. It saves a route only after the certificate and server identity match and the corresponding control ports respond. **Host Details** shows Active Address, Remote Address and verification status.
+
+- Discovery does not infer the host's address from the phone's cellular or VPN public IP.
+- Saved verified routes persist and are used as fallback when the local address is unavailable.
+- Remote addresses are discovered automatically; there are no manual remote-address fields.
+- Verification from the local network needs router NAT loopback/hairpin support. An unverified candidate is displayed but is not used as a trusted route.
+- Enable **Custom Bitrate for Remote / Metered Connections** to use a different bitrate away from an unmetered local connection.
+
+CGNAT, missing port forwarding or a router without hairpin support can prevent automatic verification.
+
+## Troubleshooting
+
+**The PC is missing or offline**
+
+Check Sunshine is running, the PC is awake, and both devices are on the intended network. Try adding the local address manually.
+
+**Pairing or certificate error**
+
+Check the PIN and the PC's identity. If Sunshine was reinstalled or its certificate changed, pair with the PC again.
+
+**Apps disappear after refreshing**
+
+A failed refresh should keep the previous catalogue and show an error. Retry after checking connectivity; include the error if reporting a bug.
+
+**A stream fails to start or ends unexpectedly**
+
+Read the error's stage, native code and port hints. Open the app's **Logs** screen: it includes `moonlight-common-c` messages as well as client logs. No-video errors usually need network/firewall checks; capture, codec or HDR errors may need host/display changes.
+
+**An APK update will not install**
+
+Check you are updating the same package from the same signing source. Locally built and CI development APKs can have different signing keys.
+
+When [reporting an issue](https://github.com/eckobrew/moonlight-android/issues), include your phone/Android version, host software, local or remote connection, stream settings, exact error and relevant logs. Remove any private information before posting logs.
+
+## Build from source
+
+Open the project in Android Studio, or use JDK 17+, Android SDK 35, NDK `27.2.12479018` and CMake `3.22.1`:
+
+```sh
+./gradlew testDebugUnitTest assembleDebug
 ```
-moonlight-android-material/
-├── app/
-│   ├── src/main/
-│   │   ├── AndroidManifest.xml
-│   │   ├── java/com/moonlight/material/
-│   │   │   ├── MoonlightApp.kt
-│   │   │   ├── MainActivity.kt
-│   │   │   ├── StreamActivity.kt
-│   │   │   ├── core/
-│   │   │   │   ├── models/ (Host, Application, StreamConfiguration, ClientFeatures, etc.)
-│   │   │   │   ├── security/ (CryptoUtils, CertificateManager, HostTrust)
-│   │   │   │   ├── state/ (AppState, AppSettingsStore, StreamSessionController)
-│   │   │   │   └── utils/ (AppLogger, BoxArtManager)
-│   │   │   ├── networking/ (SunshineHTTPClient, PairingService, WakeOnLAN, BonjourDiscoveryService, TCPProbe)
-│   │   │   ├── stream/
-│   │   │   │   ├── control/ (ControlProtocol)
-│   │   │   │   ├── rtsp/ (RtspSession)
-│   │   │   │   ├── video/ (MediaCodecDecoder)
-│   │   │   │   ├── audio/ (AudioPlaybackEngine)
-│   │   │   │   └── input/ (GamepadHandler, TouchMouseHandler, KeycodeMappings)
-│   │   │   └── ui/
-│   │   │       ├── theme/ (Color, Theme, Type)
-│   │   │       ├── hosts/ (HostGridScreen, HostCard, AddHostDialog, HostDetailsSheet)
-│   │   │       ├── apps/ (AppGridScreen, AppCard)
-│   │   │       ├── pairing/ (PairingDialog)
-│   │   │       ├── settings/ (SettingsScreen, PerAppSettingsDialog)
-│   │   │       ├── stream/ (StreamingScreen, PerformanceHUD, SessionControlsSheet, VirtualTouchOverlay)
-│   │   │       └── debug/ (LogViewerSheet)
-│   │   └── res/
-│   │       ├── drawable/ (vector assets: launcher foreground, background, logo, boxart placeholder)
-│   │       ├── values/ (strings, colors, themes)
-│   │       ├── values-de/ (German localization)
-│   │       ├── values-fr/ (French localization)
-│   │       └── values-es/ (Spanish localization)
-│   └── build.gradle.kts
-├── gradle/
-│   ├── libs.versions.toml
-│   └── wrapper/
-├── build.gradle.kts
-└── settings.gradle.kts
-```
 
----
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Native streaming dependencies are included in the repository.
 
-## Build & Run
+## Credits and licence
 
-### Prerequisites
-- Android SDK 35 (or Android Studio Ladybug / Meerkat)
-- Java 17 or Java 21
-- Gradle 8.11+
+Based on [Moonlight](https://moonlight-stream.org), [moonlight-common-c](https://github.com/moonlight-stream/moonlight-common-c), and [Eckobrew's moonlight-mac](https://github.com/eckobrew/moonlight-mac). The launcher icon comes from official Moonlight Android.
 
-### Building APK
-```bash
-./gradlew assembleDebug
-```
-Output APK is located at:
-`app/build/outputs/apk/debug/app-debug.apk`
-
-### Running Unit Tests
-```bash
-./gradlew test
-```
+See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md) for licensing and bundled dependency notices. This is a community project, not an official Moonlight release.
