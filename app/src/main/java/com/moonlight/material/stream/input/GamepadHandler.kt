@@ -32,7 +32,13 @@ class GamepadHandler(
 ) {
     private val TAG = "GAMEPAD"
     private var isMouseEmulationMode = false
-    private val handler = Handler(Looper.getMainLooper())
+    private val handler: Handler? by lazy {
+        try {
+            Handler(Looper.getMainLooper())
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     private var buttonFlags = 0
     private var leftTrigger: Byte = 0
@@ -105,9 +111,9 @@ class GamepadHandler(
         // Check for hold-Start to toggle mouse emulation
         if (event.keyCode == KeyEvent.KEYCODE_BUTTON_START && gamepadMouseEnabled) {
             if (isDown && event.repeatCount == 0) {
-                handler.postDelayed(startHoldRunnable, 1000L)
+                handler?.postDelayed(startHoldRunnable, 1000L)
             } else if (!isDown) {
-                handler.removeCallbacks(startHoldRunnable)
+                handler?.removeCallbacks(startHoldRunnable)
             }
         }
 

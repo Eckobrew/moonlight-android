@@ -18,8 +18,8 @@ import java.security.cert.X509Certificate
 import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Date
 
-class CertificateManager private constructor(private val context: Context) {
-    private val prefs = context.getSharedPreferences("moonlight_cert_prefs", Context.MODE_PRIVATE)
+class CertificateManager private constructor(private val context: Context?) {
+    private val prefs = context?.getSharedPreferences("moonlight_cert_prefs", Context.MODE_PRIVATE)
 
     var uniqueId: String
         private set
@@ -28,22 +28,25 @@ class CertificateManager private constructor(private val context: Context) {
     private var clientCert: X509Certificate? = null
     private var clientCertPem: String? = null
 
+    // In-memory constructor for unit tests
+    constructor() : this(null)
+
     init {
-        val storedUniqueId = prefs.getString("unique_id", null)
+        val storedUniqueId = prefs?.getString("unique_id", null)
         uniqueId = if (storedUniqueId != null) {
             storedUniqueId
         } else {
             val generated = CryptoUtils.hexString(CryptoUtils.randomBytes(8)).uppercase()
-            prefs.edit().putString("unique_id", generated).apply()
+            prefs?.edit()?.putString("unique_id", generated)?.apply()
             generated
         }
         loadOrGenerateCertificate()
     }
 
     private fun loadOrGenerateCertificate() {
-        val certPem = prefs.getString("client_cert_pem", null)
-        val privKeyB64 = prefs.getString("client_private_key_b64", null)
-        val pubKeyB64 = prefs.getString("client_public_key_b64", null)
+        val certPem = prefs?.getString("client_cert_pem", null)
+        val privKeyB64 = prefs?.getString("client_private_key_b64", null)
+        val pubKeyB64 = prefs?.getString("client_public_key_b64", null)
 
         if (certPem != null && privKeyB64 != null && pubKeyB64 != null) {
             try {
@@ -99,11 +102,11 @@ class CertificateManager private constructor(private val context: Context) {
             val privKeyB64 = Base64.getEncoder().encodeToString(keyPair.private.encoded)
             val pubKeyB64 = Base64.getEncoder().encodeToString(keyPair.public.encoded)
 
-            prefs.edit()
-                .putString("client_cert_pem", pem)
-                .putString("client_private_key_b64", privKeyB64)
-                .putString("client_public_key_b64", pubKeyB64)
-                .apply()
+            prefs?.edit()
+                ?.putString("client_cert_pem", pem)
+                ?.putString("client_private_key_b64", privKeyB64)
+                ?.putString("client_public_key_b64", pubKeyB64)
+                ?.apply()
 
             clientKeyPair = keyPair
             clientCert = cert

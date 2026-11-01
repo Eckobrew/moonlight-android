@@ -40,7 +40,7 @@ Status Definitions:
 | :--- | :--- | :--- | :--- |
 | `Core/State/AppState.swift` | `core/state/AppState.kt` | ported | Root reactive state, hosts collection, active navigation. |
 | `Core/State/HostWakeConnection.swift` | `core/state/HostWakeConnection.kt` | not started | Milestone M7: WoL send, waking status, 60s timeout loop. |
-| `Core/State/StreamSessionController.swift` | `core/state/StreamSessionController.kt` | not started | Core engine: M0 clean up; M3 native LiStartConnection integration. |
+| `Core/State/StreamSessionController.swift` | `core/state/StreamSessionController.kt` | ported | Milestone M3: Core engine; wired to native LiStartConnection, stages, error handling, session teardown, and HUD metrics. |
 
 ---
 
@@ -172,6 +172,6 @@ Status Definitions:
 
 ## Summary Statistics
 - **Total Reference Files Tracked**: 85
-- **Ported**: 37
-- **Not Started (Targeted in Milestones M2–M8)**: 40
+- **Ported**: 38
+- **Not Started (Targeted in Milestones M4–M8)**: 39
 - **N/A on Android (Documented Reason)**: 8

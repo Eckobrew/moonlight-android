@@ -118,4 +118,27 @@ class MediaCodecDecoder(
             mediaCodec = null
         }
     }
+
+    fun setup(videoFormat: Int, width: Int, height: Int, redrawRate: Int): Int {
+        return 0
+    }
+
+    fun cleanup() {
+        stop()
+    }
+
+    fun submitDecodeUnit(
+        frameData: ByteArray,
+        length: Int,
+        bufferType: Int,
+        frameNumber: Int,
+        frameType: Int,
+        frameHostProcessingLatency: Char,
+        receiveTimeUs: Long,
+        enqueueTimeUs: Long
+    ): Int {
+        val isKeyFrame = frameType == 0x01
+        submitDecodeUnit(frameData, 0, length, enqueueTimeUs, isKeyFrame)
+        return 0
+    }
 }

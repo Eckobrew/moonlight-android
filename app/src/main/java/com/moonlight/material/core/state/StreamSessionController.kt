@@ -1,6 +1,8 @@
 package com.moonlight.material.core.state
 
 import android.view.Surface
+import com.moonlight.material.bridge.MoonBridge
+import com.moonlight.material.core.models.AppControl
 import com.moonlight.material.core.models.Host
 import com.moonlight.material.core.models.HostHardwareMetrics
 import com.moonlight.material.core.models.PerformanceMetrics
@@ -10,6 +12,7 @@ import com.moonlight.material.core.security.CryptoUtils
 import com.moonlight.material.core.utils.AppLogger
 import com.moonlight.material.core.utils.ConnectionDiagnostics
 import com.moonlight.material.networking.SunshineHTTPClient
+import com.moonlight.material.networking.TCPProbe
 import com.moonlight.material.stream.audio.AudioPlaybackEngine
 import com.moonlight.material.stream.input.GamepadHandler
 import com.moonlight.material.stream.input.GamepadListener
@@ -20,15 +23,23 @@ import com.moonlight.material.stream.video.VideoDecoderListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.UUID
+import kotlinx.coroutines.withContext
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 class StreamSessionController(
     private val httpClient: SunshineHTTPClient
-) : VideoDecoderListener, GamepadListener, MouseEventListener {
+) : MoonBridge.ConnectionListener,
+    VideoDecoderListener,
+    GamepadListener,
+    MouseEventListener {
 
     private val TAG = "SESSION"
     private val scope = CoroutineScope(Dispatchers.Main + Job())
@@ -99,6 +110,28 @@ class StreamSessionController(
         get() = !isRemoteMonitorSession && !preserveHostApplication &&
                 (if (isShortcutMode) didLaunchHostApp else activeSettings?.quitAppOnStop == true)
 
+    @androidx.annotation.VisibleForTesting
+    internal fun setStreamingForTesting(streaming: Boolean) {
+        _isStreaming.value = streaming
+    }
+
+    private var streamJob: Job? = null
+    private var stoppingJob: Job? = null
+    private var metricsJob: Job? = null
+
+    // Real negotiated stream parameters reported by drSetup callback
+    private var negotiatedWidth: Int? = null
+    private var negotiatedHeight: Int? = null
+    private var negotiatedFps: Int? = null
+    private var negotiatedCodec: String? = null
+
+    private var totalFramesDecoded = 0
+    private var droppedFramesCount = 0
+    private var lastFpsSampleTime = 0L
+    private var framesInSample = 0
+    private var measuredFps: Double = 0.0
+    private var lastDecodeTimeMs: Double = 0.0
+
     fun togglePerformanceOverlay() {
         _showPerformanceOverlay.value = !_showPerformanceOverlay.value
     }
@@ -133,24 +166,28 @@ class StreamSessionController(
     fun markConnected() {
         if (!_isStreaming.value || _currentStageName.value == "Connected") return
         _currentStageName.value = "Connected"
+        startConnectedServices()
     }
 
-    fun handleStageFailed(stage: Int, code: Int) {
+    fun handleStageFailed(stage: Int, code: Int, customMessage: String? = null) {
         if (!_isStreaming.value) return
-        _sessionError.value = ConnectionDiagnostics.stageFailure(stage, code)
+        val portFlags = try { MoonBridge.getPortFlagsFromStage(stage) } catch (_: Throwable) { 0 }
+        val portStr = if (portFlags != 0) try { MoonBridge.stringifyPortFlags(portFlags, ", ") } catch (_: Throwable) { null } else null
+        val stageName = try { MoonBridge.getStageName(stage) } catch (_: Throwable) { null }
+        _sessionError.value = customMessage ?: ConnectionDiagnostics.stageFailure(stage, code, stageName, portStr)
         stopSession()
     }
 
-    fun handleTerminated(code: Int) {
+    fun handleTerminated(code: Int, customMessage: String? = null) {
         if (!_isStreaming.value) return
-        _sessionError.value = ConnectionDiagnostics.termination(code)
+        _sessionError.value = customMessage ?: ConnectionDiagnostics.termination(code)
         stopSession()
     }
 
     fun updateConnectionStatus(status: Int) {
         if (!_isStreaming.value) return
-        // Matches StreamSessionController.swift:243
-        _connectionWarning.value = if (status == -1) "Network quality is poor. Try lowering the bitrate." else null
+        // Matches StreamSessionController.swift:243 (CONN_STATUS_POOR = 1)
+        _connectionWarning.value = if (status == 1) "Network quality is poor. Try lowering the bitrate." else null
     }
 
     fun startSession(
@@ -173,6 +210,10 @@ class StreamSessionController(
 
         scope.launch(Dispatchers.Main) {
             try {
+                // Ensure any previous session teardown has completed before starting another
+                stoppingJob?.join()
+                if (sessionGeneration != generation) return@launch
+
                 activeHost = host
                 activeApp = app
                 activeSettings = settings
@@ -181,6 +222,13 @@ class StreamSessionController(
                 _connectionWarning.value = null
                 _currentStage.value = 1
                 _currentStageName.value = "Requesting session from host..."
+                negotiatedWidth = null
+                negotiatedHeight = null
+                negotiatedFps = null
+                negotiatedCodec = null
+                totalFramesDecoded = 0
+                droppedFramesCount = 0
+                measuredFps = 0.0
                 onSessionStarted?.invoke()
 
                 // Generate 16-byte random key for remote input AES encryption
@@ -195,9 +243,9 @@ class StreamSessionController(
                 activeHost = updatedHost
 
                 // Launch or Resume decision matching StreamSessionController.swift:301, 339, 359
-                preserveHostApplication = app.control == com.moonlight.material.core.models.AppControl.RESUME
+                preserveHostApplication = app.control == AppControl.RESUME
                 val sessionUrl: String?
-                if (app.matchesRunning(updatedHost) || app.control == com.moonlight.material.core.models.AppControl.RESUME) {
+                if (app.matchesRunning(updatedHost) || app.control == AppControl.RESUME) {
                     sessionUrl = httpClient.resumeApp(
                         host = updatedHost,
                         settings = settings,
@@ -218,10 +266,36 @@ class StreamSessionController(
 
                 if (!_isStreaming.value || sessionGeneration != generation) return@launch
 
-                _currentStage.value = 2
-                _currentStageName.value = "Starting stream connection..."
+                // Create hardware video decoder and audio playback engine
+                videoDecoder = MediaCodecDecoder(
+                    surface = surface,
+                    width = settings.width,
+                    height = settings.height,
+                    fps = settings.fps,
+                    codec = settings.codec,
+                    enableHdr = settings.enableHdr,
+                    listener = this@StreamSessionController
+                )
+                audioEngine = AudioPlaybackEngine()
 
-                // The native Limelight connection (LiStartConnection) will be initiated here in M3.
+                // Register native bridge callbacks
+                MoonBridge.connectionListener = this@StreamSessionController
+                MoonBridge.videoDecoderListener = videoBridgeListener
+                MoonBridge.audioRendererListener = audioBridgeListener
+
+                // Wait up to 3s for host RTSP port to accept connections (StreamSessionController.swift:401, 509-534)
+                waitForRtspPortReady(updatedHost, sessionUrl)
+                if (!_isStreaming.value || sessionGeneration != generation) return@launch
+
+                // Launch Limelight connection on background thread (LiStartConnection blocks)
+                startLimelightConnection(
+                    host = updatedHost,
+                    sessionUrl = sessionUrl,
+                    settings = settings,
+                    rikey = rikey,
+                    rikeyId = rikeyId,
+                    generation = generation
+                )
 
             } catch (e: Exception) {
                 AppLogger.error("Failed to start session: ${e.message}", TAG)
@@ -229,6 +303,138 @@ class StreamSessionController(
                 stopSession()
             }
         }
+    }
+
+    private suspend fun waitForRtspPortReady(host: Host, sessionUrl: String?, timeoutSeconds: Double = 3.0) {
+        var port = 48010
+        if (!sessionUrl.isNullOrEmpty()) {
+            try {
+                val uri = java.net.URI(sessionUrl)
+                if (uri.port > 0) {
+                    port = uri.port
+                }
+            } catch (_: Exception) {}
+        }
+
+        val address = host.effectiveAddress
+        val start = System.currentTimeMillis()
+        val deadline = start + (timeoutSeconds * 1000).toLong()
+
+        while (System.currentTimeMillis() < deadline) {
+            if (!_isStreaming.value) return
+            val reachable = TCPProbe.canConnect(address, port, 1000)
+            if (reachable) {
+                val elapsed = System.currentTimeMillis() - start
+                AppLogger.info("RTSP port $port is ready on $address (waited ${elapsed}ms)", TAG)
+                return
+            }
+            delay(150)
+        }
+        AppLogger.info("Proceeding to RTSP handshake for $address:$port", TAG)
+    }
+
+    private fun startLimelightConnection(
+        host: Host,
+        sessionUrl: String?,
+        settings: StreamSettings,
+        rikey: ByteArray,
+        rikeyId: Int,
+        generation: Long
+    ) {
+        val chosenBitrateKbps = settings.streamBitrateKbps(isRemote = false)
+        _runtimeBitrateKbps.value = chosenBitrateKbps
+
+        val riAesKey = rikey
+        val riAesIv = ByteArray(16)
+        ByteBuffer.wrap(riAesIv).order(ByteOrder.BIG_ENDIAN).putInt(rikeyId)
+
+        val videoFormatMask = settings.codec.limelightMask(settings.enableHdr, settings.features.yuv444)
+        val videoCapabilities = 0x1 // CAPABILITY_DIRECT_SUBMIT
+
+        val colorSpace = 2 // COLORSPACE_REC_709
+        val colorRange = if (settings.fullRangeColor) 1 else 0
+
+        streamJob = scope.launch(Dispatchers.IO) {
+            val result = try {
+                MoonBridge.startConnection(
+                    address = host.effectiveAddress,
+                    appVersion = host.appVersion,
+                    gfeVersion = host.gfeVersion.ifEmpty { null },
+                    rtspSessionUrl = sessionUrl,
+                    serverCodecModeSupport = host.serverCodecModeSupport,
+                    width = settings.width,
+                    height = settings.height,
+                    fps = settings.fps,
+                    bitrate = chosenBitrateKbps,
+                    packetSize = settings.packetSize,
+                    streamingRemotely = 0, // STREAM_CFG_AUTO
+                    audioConfiguration = settings.audioMode.limelightValue,
+                    supportedVideoFormats = videoFormatMask,
+                    clientRefreshRateX100 = 6000,
+                    riAesKey = riAesKey,
+                    riAesIv = riAesIv,
+                    videoCapabilities = videoCapabilities,
+                    colorSpace = colorSpace,
+                    colorRange = colorRange
+                )
+            } catch (t: Throwable) {
+                AppLogger.error("LiStartConnection threw: ${t.message}", TAG)
+                -1
+            }
+
+            withContext(Dispatchers.Main) {
+                if (_isStreaming.value && sessionGeneration == generation) {
+                    if (result != 0 && _sessionError.value == null) {
+                        _sessionError.value = "Connection failed with code $result"
+                        stopSession()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startConnectedServices() {
+        stopMetricsPolling()
+        startMetricsPolling()
+    }
+
+    private fun startMetricsPolling() {
+        metricsJob = scope.launch(Dispatchers.IO) {
+            while (isActive && _isStreaming.value) {
+                val rttLong = try { MoonBridge.getEstimatedRttInfo() } catch (_: Throwable) { -1L }
+                val rttMs = if (rttLong >= 0) (rttLong ushr 32).toDouble() else 0.0
+                val rttVarMs = if (rttLong >= 0) (rttLong and 0xFFFFFFFFL).toDouble() else 0.0
+
+                val settings = activeSettings
+                val currentWidth = negotiatedWidth ?: settings?.width ?: 1920
+                val currentHeight = negotiatedHeight ?: settings?.height ?: 1080
+                val currentCodec = negotiatedCodec ?: "H.264"
+                val targetFps = negotiatedFps ?: settings?.fps ?: 60
+
+                withContext(Dispatchers.Main) {
+                    _metrics.value = PerformanceMetrics(
+                        currentFps = measuredFps,
+                        targetFps = targetFps,
+                        decodeTimeMs = lastDecodeTimeMs,
+                        roundTripTimeMs = rttMs,
+                        roundTripTimeVarianceMs = rttVarMs,
+                        bitrateMbps = _runtimeBitrateKbps.value / 1000.0,
+                        packetLossPercentage = 0.0,
+                        networkDroppedFrames = droppedFramesCount,
+                        currentCodec = currentCodec,
+                        resolution = "${currentWidth}x${currentHeight}",
+                        vsyncEnabled = settings?.enableVsync ?: true,
+                        pacingEnabled = settings?.enableFramePacing ?: true
+                    )
+                }
+                delay(1000)
+            }
+        }
+    }
+
+    private fun stopMetricsPolling() {
+        metricsJob?.cancel()
+        metricsJob = null
     }
 
     fun stopSession() {
@@ -240,19 +446,40 @@ class StreamSessionController(
         _isStreaming.value = false
         onSessionStopped?.invoke()
 
+        stopMetricsPolling()
+
         _currentStage.value = 0
         _currentStageName.value = ""
         _showSessionControls.value = false
         _runtimeBitrateSupported.value = false
         _hostStatistics.value = null
 
-        videoDecoder?.stop()
-        videoDecoder = null
-        audioEngine?.stop()
-        audioEngine = null
+        // Stop native callbacks and interrupt blocking LiStartConnection
+        try { MoonBridge.interruptConnection() } catch (_: Throwable) {}
 
-        if (hostToQuit != null && shouldQuit) {
-            scope.launch(Dispatchers.IO) {
+        val connectionJob = streamJob
+        streamJob = null
+
+        stoppingJob = scope.launch(Dispatchers.IO) {
+            try {
+                connectionJob?.cancelAndJoin()
+                MoonBridge.stopConnection()
+            } catch (t: Throwable) {
+                AppLogger.warn("Error stopping native connection: ${t.message}", TAG)
+            }
+
+            withContext(Dispatchers.Main) {
+                videoDecoder?.stop()
+                videoDecoder = null
+                audioEngine?.stop()
+                audioEngine = null
+
+                MoonBridge.connectionListener = null
+                MoonBridge.videoDecoderListener = null
+                MoonBridge.audioRendererListener = null
+            }
+
+            if (hostToQuit != null && shouldQuit) {
                 try {
                     httpClient.quitApp(hostToQuit)
                 } catch (e: Exception) {
@@ -263,30 +490,171 @@ class StreamSessionController(
     }
 
     fun sendKeyboardEvent(keyCode: Short, isDown: Boolean, modifiers: Byte = 0, flags: Byte = 0) {
-        // Forwarded via native LiSendKeyboardEvent2 in M6
+        val keyAction: Byte = if (isDown) 0x03 else 0x04
+        try {
+            MoonBridge.sendKeyboardInput(keyCode, keyAction, modifiers, flags)
+        } catch (_: Throwable) {}
     }
 
     fun applyRuntimeBitrate(mbps: Double) {
-        val host = activeHost ?: return
         if (mbps <= 0.0) return
         val kbps = (mbps * 1000).toInt()
-        scope.launch(Dispatchers.IO) {
-            try {
-                _runtimeBitrateKbps.value = kbps
-                _hostControlMessage.value = "Bitrate set to ${mbps} Mbps"
-            } catch (e: Exception) {
-                _hostControlMessage.value = e.message
+        _runtimeBitrateKbps.value = kbps
+        _hostControlMessage.value = "Bitrate set to ${mbps} Mbps"
+    }
+
+    // --- MoonBridge.ConnectionListener ---
+
+    override fun onStageStarting(stage: Int) {
+        val stageName = try { MoonBridge.getStageName(stage) } catch (_: Throwable) { "Stage $stage" }
+        scope.launch(Dispatchers.Main) {
+            updateStage(stage, stageName)
+        }
+    }
+
+    override fun onStageComplete(stage: Int) {
+        // Stage completed successfully
+    }
+
+    override fun onStageFailed(stage: Int, errorCode: Int) {
+        scope.launch(Dispatchers.Main) {
+            handleStageFailed(stage, errorCode)
+        }
+    }
+
+    override fun onConnectionStarted() {
+        scope.launch(Dispatchers.Main) {
+            markConnected()
+        }
+    }
+
+    override fun onConnectionTerminated(errorCode: Int) {
+        scope.launch(Dispatchers.Main) {
+            if (errorCode != 0) {
+                handleTerminated(errorCode)
+            } else {
+                stopSession()
             }
         }
     }
 
-    // VideoDecoderListener
+    override fun onConnectionStatusUpdate(connectionStatus: Int) {
+        scope.launch(Dispatchers.Main) {
+            updateConnectionStatus(connectionStatus)
+        }
+    }
+
+    override fun onSetHdrMode(enabled: Boolean, hdrMetadata: ByteArray?) {
+        // Handled in M4
+    }
+
+    override fun onRumble(controllerNumber: Short, lowFreqMotor: Short, highFreqMotor: Short) {
+        // Forwarded to GamepadHandler in M6
+    }
+
+    override fun onRumbleTriggers(controllerNumber: Short, leftTrigger: Short, rightTrigger: Short) {
+        // Forwarded to GamepadHandler in M6
+    }
+
+    override fun onSetMotionEventState(controllerNumber: Short, motionType: Byte, reportRateHz: Short) {
+        // Forwarded to GamepadHandler in M6
+    }
+
+    override fun onSetControllerLED(controllerNumber: Short, r: Byte, g: Byte, b: Byte) {
+        // Forwarded to GamepadHandler in M6
+    }
+
+    // --- MoonBridge.VideoDecoderRendererListener & AudioRendererListener ---
+
+    val videoBridgeListener = object : MoonBridge.VideoDecoderRendererListener {
+        override fun onSetup(videoFormat: Int, width: Int, height: Int, redrawRate: Int): Int {
+            negotiatedWidth = width
+            negotiatedHeight = height
+            negotiatedFps = redrawRate
+            val isAv1 = (videoFormat and 0xF000) != 0
+            val isHevc = (videoFormat and 0x0F00) != 0
+            var codecName = when {
+                isAv1 -> "AV1"
+                isHevc -> "HEVC"
+                else -> "H.264"
+            }
+            if ((videoFormat and 0xCC04) != 0) {
+                codecName += " 4:4:4"
+            }
+            negotiatedCodec = codecName
+            return videoDecoder?.setup(videoFormat, width, height, redrawRate) ?: 0
+        }
+
+        override fun onStart() {
+            videoDecoder?.start()
+        }
+
+        override fun onStop() {
+            videoDecoder?.stop()
+        }
+
+        override fun onCleanup() {
+            videoDecoder?.cleanup()
+        }
+
+        override fun onSubmitDecodeUnit(
+            frameData: ByteArray,
+            length: Int,
+            bufferType: Int,
+            frameNumber: Int,
+            frameType: Int,
+            frameHostProcessingLatency: Char,
+            receiveTimeUs: Long,
+            enqueueTimeUs: Long
+        ): Int {
+            return videoDecoder?.submitDecodeUnit(
+                frameData, length, bufferType, frameNumber, frameType,
+                frameHostProcessingLatency, receiveTimeUs, enqueueTimeUs
+            ) ?: 0
+        }
+    }
+
+    val audioBridgeListener = object : MoonBridge.AudioRendererListener {
+        override fun onInit(audioConfiguration: Int, sampleRate: Int, samplesPerFrame: Int): Int {
+            return audioEngine?.init(audioConfiguration, sampleRate, samplesPerFrame) ?: 0
+        }
+
+        override fun onStart() {
+            // Audio started
+        }
+
+        override fun onStop() {
+            audioEngine?.stop()
+        }
+
+        override fun onCleanup() {
+            audioEngine?.cleanup()
+        }
+
+        override fun onPlaySample(sampleData: ShortArray) {
+            audioEngine?.playSample(sampleData)
+        }
+    }
+
+    // --- VideoDecoderListener ---
+
     override fun onFrameDecoded(decodeTimeMs: Double) {
-        // Will be updated from real decoder metrics
+        totalFramesDecoded++
+        framesInSample++
+        lastDecodeTimeMs = decodeTimeMs
+
+        val now = System.currentTimeMillis()
+        if (lastFpsSampleTime == 0L) {
+            lastFpsSampleTime = now
+        } else if (now - lastFpsSampleTime >= 1000) {
+            measuredFps = (framesInSample * 1000.0) / (now - lastFpsSampleTime)
+            framesInSample = 0
+            lastFpsSampleTime = now
+        }
     }
 
     override fun onFrameDropped() {
-        // Will be updated from real decoder metrics
+        droppedFramesCount++
     }
 
     override fun onDecoderError(error: String) {
@@ -294,7 +662,8 @@ class StreamSessionController(
         stopSession()
     }
 
-    // GamepadListener
+    // --- GamepadListener ---
+
     override fun onControllerStateChanged(
         controllerNumber: Short,
         buttonFlags: Int,
@@ -305,35 +674,62 @@ class StreamSessionController(
         rightStickX: Short,
         rightStickY: Short
     ) {
-        // Forwarded via native LiSendMultiControllerEvent in M6
+        if (!_isStreaming.value) return
+        try {
+            MoonBridge.sendMultiControllerInput(
+                controllerNumber,
+                1.toShort(),
+                buttonFlags,
+                leftTrigger,
+                rightTrigger,
+                leftStickX,
+                leftStickY,
+                rightStickX,
+                rightStickY
+            )
+        } catch (_: Throwable) {}
     }
 
     override fun onEmulatedMouseMove(deltaX: Short, deltaY: Short) {
-        // Forwarded via native LiSendMouseMoveEvent in M6
+        onMouseMoveRelative(deltaX, deltaY)
     }
 
     override fun onEmulatedMouseButton(button: Byte, isDown: Boolean) {
-        // Forwarded via native LiSendMouseButtonEvent in M6
+        onMouseButton(button, isDown)
     }
 
     override fun onEmulatedMouseScroll(scroll: Short) {
-        // Forwarded via native LiSendHighResScrollEvent in M6
+        onMouseScroll(scroll)
     }
 
-    // MouseEventListener
+    // --- MouseEventListener ---
+
     override fun onMouseMoveRelative(deltaX: Short, deltaY: Short) {
-        // Forwarded via native LiSendMouseMoveEvent in M6
+        if (!_isStreaming.value) return
+        try {
+            MoonBridge.sendMouseMove(deltaX, deltaY)
+        } catch (_: Throwable) {}
     }
 
     override fun onMouseMoveAbsolute(x: Short, y: Short, screenW: Short, screenH: Short) {
-        // Forwarded via native LiSendMousePositionEvent in M6
+        if (!_isStreaming.value) return
+        try {
+            MoonBridge.sendMousePosition(x, y, screenW, screenH)
+        } catch (_: Throwable) {}
     }
 
     override fun onMouseButton(button: Byte, isDown: Boolean) {
-        // Forwarded via native LiSendMouseButtonEvent in M6
+        if (!_isStreaming.value) return
+        try {
+            val eventType: Byte = if (isDown) 0x01 else 0x02
+            MoonBridge.sendMouseButton(eventType, button)
+        } catch (_: Throwable) {}
     }
 
     override fun onMouseScroll(amount: Short) {
-        // Forwarded via native LiSendHighResScrollEvent in M6
+        if (!_isStreaming.value) return
+        try {
+            MoonBridge.sendMouseHighResScroll(amount)
+        } catch (_: Throwable) {}
     }
 }
