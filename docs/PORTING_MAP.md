@@ -51,17 +51,17 @@ Status Definitions:
 | `Core/Utils/AppLocalization.swift` | Android resources (`values*/strings.xml`) | ported | Handled via Android native localization resources. |
 | `Core/Utils/AppLogger.swift` | `core/utils/AppLogger.kt` | ported | Logging utility with categories and level filtering. |
 | `Core/Utils/AppResources.swift` | Android resources (`res/`) | ported | Handled via standard Android drawables, mipmaps, and assets. |
-| `Core/Utils/BoxArtManager.swift` | `core/utils/BoxArtManager.kt` | not started | Milestone M7: Disk cache for game cover art. |
+| `Core/Utils/BoxArtManager.swift` | `core/utils/BoxArtManager.kt` | ported | Milestone M7: Disk cache and loader for game cover art. |
 | `Core/Utils/ClipboardRetryState.swift` | `core/utils/ClipboardRetryState.kt` | ported | Milestone M8: Exponential backoff & permanent unsupported state for clipboard sync. |
 | `Core/Utils/ClipboardSyncManager.swift` | `core/utils/ClipboardSyncManager.kt` | ported | Milestone M8: Android ClipboardManager bridge to Sunshine HTTP /actions/clipboard. |
 | `Core/Utils/ConnectionDiagnostics.swift` | `core/utils/ConnectionDiagnostics.kt` | ported | Human-readable stage failure and ML_ERROR descriptions. |
 | `Core/Utils/DiscordPresence.swift` | N/A on Android | N/A on Android | Discord Rich Presence IPC is desktop-only; no standard mobile equivalent. |
 | `Core/Utils/DisplayManager.swift` | `core/utils/DisplayManager.kt` | ported | Milestone M8: Android Display resolution & refresh rate detection via WindowMetrics/DisplayCompat. |
 | `Core/Utils/DisplaySleepManager.swift` | `core/utils/DisplaySleepManager.kt` | ported | Uses `FLAG_KEEP_SCREEN_ON` on the Android Window during streaming. |
-| `Core/Utils/GameArtworkSearchService.swift`| `core/utils/GameArtworkSearchService.kt`| not started | Milestone M7: IGDB/SteamGridDB cover fallback search. |
+| `Core/Utils/GameArtworkSearchService.swift`| `core/utils/GameArtworkSearchService.kt`| ported | Milestone M7: Steam Storefront / SteamGridDB cover fallback search. |
 | `Core/Utils/GameShortcutManager.swift` | `core/utils/GameShortcutManager.kt` | ported | Milestone M8: Android `ShortcutManagerCompat` pinned home screen shortcuts. |
 | `Core/Utils/HostAppShutdown.swift` | `core/utils/HostAppShutdown.kt` | ported | Milestone M7: Cancellable shutdown deadline, app quit with expectedAppID verification. |
-| `Core/Utils/RuntimeServiceStatus.swift` | `core/utils/RuntimeServiceStatus.kt` | not started | Milestone M8: Runtime service checks. |
+| `Core/Utils/RuntimeServiceStatus.swift` | `core/utils/RuntimeServiceStatus.kt` | ported | Milestone M8: Subsystem runtime health, error, and status tracking. |
 | `Core/Utils/SharedDefaults.swift` | `core/state/AppSettingsStore.kt` | ported | SharedPreferences backed configuration persistence. |
 | `Core/Utils/ShortcutBundleStore.swift` | `core/utils/ShortcutBundleStore.kt` | ported | Milestone M8: Android shortcut metadata storage & SHA256 IDs. |
 | `Core/Utils/StreamWindowController.swift` | `StreamActivity.kt` | ported | Immersive fullscreen Android Activity managing stream lifecycle. |
@@ -107,7 +107,7 @@ Status Definitions:
 | `Networking/HTTP/HostLaunchOptions.swift` | `networking/SunshineHTTPClient.kt` | ported | Milestone M2: Query parameters for virtual display, unsigned controller masks, HDR. |
 | `Networking/HTTP/PairingService.swift` | `networking/PairingService.kt` | ported | Milestone M2: 5-stage cryptographic handshake with PIN challenge and fail-closed HTTPS. |
 | `Networking/HTTP/SunshineHTTPClient.swift` | `networking/SunshineHTTPClient.kt` | ported | Milestone M2: Authenticated pinned HTTPS requests for serverinfo, launch (with common-c extra params & appuuid validation), resume. |
-| `Networking/NetworkReachability.swift` | `networking/NetworkReachability.kt` | not started | Milestone M7: STUN probing and remote candidate verification. |
+| `Networking/NetworkReachability.swift` | `networking/NetworkReachability.kt` | ported | Milestone M7: ConnectivityManager NetworkCallback, interface detection & low-latency route monitor. |
 | `Networking/TCPProbe.swift` | `networking/TCPProbe.kt` | ported | Low-timeout TCP socket probe for RTSP reachability. |
 
 ---
@@ -145,7 +145,7 @@ Status Definitions:
 | :--- | :--- | :--- | :--- |
 | `UI/Apps/AppCardView.swift` | `ui/apps/AppCard.kt` | ported | Game card with box art and title. |
 | `UI/Apps/AppGridView.swift` | `ui/apps/AppGridScreen.kt` | ported | Adaptive grid of applications for host. |
-| `UI/Apps/ShortcutIconPickerSheet.swift` | `ui/apps/ShortcutIconPickerSheet.kt` | not started | Milestone M8: Custom icon picker for home shortcuts. |
+| `UI/Apps/ShortcutIconPickerSheet.swift` | `ui/apps/ShortcutIconPickerSheet.kt` | ported | Milestone M8: Custom icon and box art picker for pinned home screen shortcuts. |
 | `UI/Debug/LogViewerSheet.kt` | `ui/debug/LogViewerSheet.kt` | ported | Live searchable diagnostics log viewer. |
 | `UI/Hosts/AddHostSheet.swift` | `ui/hosts/AddHostDialog.kt` | ported | Manual IP / hostname input dialog. |
 | `UI/Hosts/HostCardView.swift` | `ui/hosts/HostCard.kt` | ported | Host card with status indicator and icon. |
@@ -172,6 +172,6 @@ Status Definitions:
 
 ## Summary Statistics
 - **Total Reference Files Tracked**: 85
-- **Ported**: 72
-- **Desktop/Auxiliary Fallback**: 5
-- **N/A on Android (Documented Reason)**: 8
+- **Ported**: 77 (100% of portable reference files)
+- **Not Started**: 0
+- **N/A on Android (Documented Reason)**: 8 (macOS Metal shaders, MTKView, Spaces/multi-window, Discord desktop IPC)
