@@ -5,6 +5,13 @@ import com.moonlight.material.core.utils.ClipboardSyncManager
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.hardware.lights.LightsManager
+import android.hardware.lights.LightsRequest
+import android.hardware.lights.LightState
 import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
@@ -115,6 +122,16 @@ class StreamSessionController(
     private inner class Controller(val slot: Int, var device: InputDevice) {
         val handler = GamepadHandler(this@StreamSessionController, controllerNumber = slot.toShort())
         var state: ControllerState? = null
+        val sensors = mutableMapOf<Byte, Pair<SensorManager, SensorEventListener>>()
+        var lights: LightsManager.LightsSession? = null
+
+        fun stopFeedback() {
+            sensors.values.forEach { (manager, listener) -> manager.unregisterListener(listener) }
+            sensors.clear()
+            if (Build.VERSION.SDK_INT >= 31) lights?.close()
+            lights = null
+            controllerVibrator(device).cancel()
+        }
     }
 
     private val controllers = mutableMapOf<Int, Controller>()
@@ -150,7 +167,7 @@ class StreamSessionController(
             if (id in ids) continue
             val removed = controllers.remove(id) ?: continue
             removed.handler.reset()
-            controllerVibrator(removed.device).cancel()
+            removed.stopFeedback()
         }
         devices.forEach { controllerHandler(it.id, it, refresh = false) }
         if (_currentStageName.value == "Connected") refreshControllerRegistration()
@@ -204,7 +221,14 @@ class StreamSessionController(
             if (registeredControllers and bit != 0) continue
             val device = controller.device
             val type = MoonBridge.guessControllerType(device.vendorId, device.productId)
-            val capabilities = if (controllerVibrator(device).hasVibrator()) 3 else 1
+            var capabilities = if (controllerVibrator(device).hasVibrator()) 3 else 1
+            if (Build.VERSION.SDK_INT >= 31) {
+                if (device.sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null) capabilities = capabilities or 0x10
+                if (device.sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null) capabilities = capabilities or 0x20
+            }
+            if (Build.VERSION.SDK_INT >= 34 && device.lightsManager.lights.any { it.hasRgbControl() }) {
+                capabilities = capabilities or 0x80
+            }
             val next = registeredControllers or bit
             val result = MoonBridge.sendControllerArrivalEvent(
                 controller.slot.toByte(), (next or keepSlot).toShort(), type, ControllerButtonFlags.STANDARD_BUTTONS, capabilities.toShort()
@@ -661,7 +685,7 @@ class StreamSessionController(
         controllers.values.forEach {
             it.handler.reset()
             it.state = null
-            controllerVibrator(it.device).cancel()
+            it.stopFeedback()
         }
         controllerRetryJob?.cancel()
         controllerRetryJob = null
@@ -938,15 +962,59 @@ class StreamSessionController(
     }
 
     override fun onRumbleTriggers(controllerNumber: Short, leftTrigger: Short, rightTrigger: Short) {
-        onRumble(controllerNumber, leftTrigger, rightTrigger)
+        // Dedicated trigger motors are not exposed by the generic Android vibrator.
     }
 
     override fun onSetMotionEventState(controllerNumber: Short, motionType: Byte, reportRateHz: Short) {
-        // Forwarded to GamepadHandler in M6
+        if (Build.VERSION.SDK_INT < 31) return
+        dispatchNativeEvent {
+            val controller = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }
+                ?: return@dispatchNativeEvent
+            controller.sensors.remove(motionType)?.let { (manager, listener) -> manager.unregisterListener(listener) }
+            val rate = reportRateHz.toInt() and 0xFFFF
+            if (rate == 0) return@dispatchNativeEvent
+            val type = when (motionType.toInt()) {
+                1 -> Sensor.TYPE_ACCELEROMETER
+                2 -> Sensor.TYPE_GYROSCOPE
+                else -> return@dispatchNativeEvent
+            }
+            val manager = controller.device.sensorManager
+            val sensor = manager.getDefaultSensor(type) ?: return@dispatchNativeEvent
+            val listener = object : SensorEventListener {
+                override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
+                override fun onSensorChanged(event: SensorEvent) {
+                    if (controller.sensors[motionType]?.second !== this || !canForwardGamepadInput) return
+                    val scale = if (type == Sensor.TYPE_GYROSCOPE) (180.0 / Math.PI).toFloat() else 1f
+                    MoonBridge.sendControllerMotionEvent(
+                        controllerNumber.toByte(), motionType,
+                        event.values[0] * scale, event.values[1] * scale, event.values[2] * scale
+                    )
+                }
+            }
+            if (manager.registerListener(listener, sensor, 1_000_000 / rate.coerceAtMost(200))) {
+                controller.sensors[motionType] = manager to listener
+            }
+        }
     }
 
     override fun onSetControllerLED(controllerNumber: Short, r: Byte, g: Byte, b: Byte) {
-        // Forwarded to GamepadHandler in M6
+        if (Build.VERSION.SDK_INT < 34) return
+        dispatchNativeEvent {
+            val controller = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }
+                ?: return@dispatchNativeEvent
+            val lights = controller.device.lightsManager
+            val rgb = lights.lights.filter { it.hasRgbControl() }
+            if (rgb.isEmpty()) return@dispatchNativeEvent
+            try {
+                val session = controller.lights ?: lights.openSession().also { controller.lights = it }
+                val state = LightState(android.graphics.Color.rgb(r.toInt() and 255, g.toInt() and 255, b.toInt() and 255))
+                val request = LightsRequest.Builder()
+                rgb.forEach { request.addLight(it, state) }
+                session.requestLights(request.build())
+            } catch (e: RuntimeException) {
+                AppLogger.warn("Could not update controller light: ${e.message}", "GAMEPAD")
+            }
+        }
     }
 
     // --- MoonBridge.VideoDecoderRendererListener & AudioRendererListener ---
