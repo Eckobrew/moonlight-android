@@ -141,7 +141,8 @@ class StreamSessionController(
     private var controllerRetryJob: Job? = null
 
     val canForwardGamepadInput: Boolean
-        get() = _isStreaming.value && _currentStageName.value == "Connected" && !localInputActive
+        get() = _isStreaming.value && _currentStageName.value == "Connected" && !localInputActive &&
+            (hasAppFocus || currentSettings?.features?.backgroundGamepad == true)
 
     fun updatePhysicalControllers(devices: List<InputDevice>) {
         val ids = devices.map { it.id }.toSet()
@@ -347,6 +348,12 @@ class StreamSessionController(
 
     fun updateAppFocus(focused: Boolean) {
         hasAppFocus = focused
+        if (!focused && currentSettings?.features?.backgroundGamepad != true) {
+            controllers.values.forEach {
+                it.handler.reset(keepMouseMode = true)
+                onControllerStateChanged(it.slot.toShort(), 0, 0, 0, 0, 0, 0, 0)
+            }
+        }
         audioEngine?.updateFocus(focused)
         updateClipboardSync()
     }
