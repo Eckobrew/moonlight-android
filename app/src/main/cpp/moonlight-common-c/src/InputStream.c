@@ -632,7 +632,8 @@ static int sendEnableHaptics(void) {
 
     // Avoid sending this on earlier server versions, since they may terminate
     // the connection upon receiving an unexpected packet.
-    if (!APP_VERSION_AT_LEAST(7, 1, 0)) {
+    // Sunshine sends controller feedback without this legacy GFE packet.
+    if (!APP_VERSION_AT_LEAST(7, 1, 0) || IS_SUNSHINE()) {
         return 0;
     }
 
