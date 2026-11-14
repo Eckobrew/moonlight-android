@@ -1,6 +1,8 @@
 package com.moonlight.material.stream.video
 
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
 import android.os.SystemClock
@@ -48,7 +50,6 @@ class MediaCodecDecoder(
 
     private var videoFormat: Int = MoonBridge.VIDEO_FORMAT_H264
     private var mimeType: String = MediaFormat.MIMETYPE_VIDEO_AVC
-    private var configuredFormat: MediaFormat? = null
 
     // Parameter sets storage
     private val spsBuffers = mutableListOf<ByteArray>()
@@ -102,52 +103,82 @@ class MediaCodecDecoder(
         }
     }
 
-    private fun initializeDecoder(): Int {
-        try {
-            stopDecoderInternal()
+    private data class DecoderCandidate(val name: String, val lowLatency: Boolean, val software: Boolean)
 
-            val format = MediaFormat.createVideoFormat(mimeType, streamWidth, streamHeight).apply {
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, streamWidth * streamHeight * 3 / 2)
-                setInteger(MediaFormat.KEY_FRAME_RATE, streamFps)
-                setInteger(MediaFormat.KEY_PRIORITY, 0) // Real-time priority
-
-                // Low latency mode on API 30+
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                }
-
-                // Adaptive playback capabilities
-                setInteger(MediaFormat.KEY_MAX_WIDTH, streamWidth)
-                setInteger(MediaFormat.KEY_MAX_HEIGHT, streamHeight)
-
-                // Operating rate hint
-                setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE.toInt())
-
-                // Apply color and HDR metadata
-                hdrState.applyToMediaFormat(this)
+    private fun decoderCandidates(): List<DecoderCandidate> {
+        return MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.mapNotNull { info ->
+            if (info.isEncoder || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && info.isAlias)) {
+                return@mapNotNull null
             }
+            val type = info.supportedTypes.firstOrNull { it.equals(mimeType, ignoreCase = true) }
+                ?: return@mapNotNull null
+            val lowLatency = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                runCatching {
+                    info.getCapabilitiesForType(type)
+                        .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
+                }.getOrDefault(false)
+            val software = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isSoftwareOnly
+                else info.name.startsWith("OMX.google.", ignoreCase = true)
+            DecoderCandidate(info.name, lowLatency, software)
+        }.sortedWith(compareBy<DecoderCandidate> { it.software }.thenByDescending { it.lowLatency })
+    }
 
-            AppLogger.info("Creating decoder for $mimeType (${streamWidth}x${streamHeight} @ ${streamFps}fps)", TAG)
-            val codec = MediaCodec.createDecoderByType(mimeType)
-            codec.configure(format, surface, null, 0)
-            codec.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
-            codec.setOnFrameRenderedListener({ source, _, renderTimeNs ->
-                if (source === videoDecoder && !isStopping.get()) performance.renderedFrame(renderTimeNs)
-            }, Handler(Looper.getMainLooper()))
-            codec.start()
-
-            videoDecoder = codec
-            configuredFormat = format
-            isRunning.set(true)
-            isStopping.set(false)
-
-            startRendererThread()
-            return MoonBridge.DR_OK
-        } catch (e: Exception) {
-            AppLogger.error("Failed to initialize MediaCodec for $mimeType: ${e.message}", TAG)
-            listener?.onDecoderError(e.message ?: "Failed to initialize decoder")
-            return -1
+    private fun initializeDecoder(): Int {
+        stopDecoderInternal()
+        val candidates = runCatching { decoderCandidates() }.getOrElse {
+            AppLogger.warn("Could not enumerate video decoders: ${it.message}", TAG)
+            emptyList()
         }
+        var failure = "No decoder could start for $mimeType"
+        for (candidate in candidates.ifEmpty { listOf(null) }) {
+            val latencyOptions = when {
+                candidate?.lowLatency == true -> listOf(MediaFormat.KEY_LOW_LATENCY, null)
+                candidate?.name?.startsWith("OMX.Exynos.", ignoreCase = true) == true &&
+                    mimeType == MediaFormat.MIMETYPE_VIDEO_AVC ->
+                    listOf("vendor.rtc-ext-dec-low-latency.enable", null)
+                else -> listOf(null)
+            }
+            for (latencyKey in latencyOptions) {
+                var codecToRelease: MediaCodec? = null
+                try {
+                    val format = MediaFormat.createVideoFormat(mimeType, streamWidth, streamHeight).apply {
+                        setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, streamWidth * streamHeight * 3 / 2)
+                        setInteger(MediaFormat.KEY_FRAME_RATE, streamFps)
+                        if (latencyKey != MediaFormat.KEY_LOW_LATENCY) setInteger(MediaFormat.KEY_PRIORITY, 0)
+                        setInteger(MediaFormat.KEY_MAX_WIDTH, streamWidth)
+                        setInteger(MediaFormat.KEY_MAX_HEIGHT, streamHeight)
+                        latencyKey?.let { setInteger(it, 1) }
+                        hdrState.applyToMediaFormat(this)
+                    }
+
+                    val codec = if (candidate != null) MediaCodec.createByCodecName(candidate.name)
+                        else MediaCodec.createDecoderByType(mimeType)
+                    codecToRelease = codec
+                    codec.configure(format, surface, null, 0)
+                    codec.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+                    codec.setOnFrameRenderedListener({ source, _, renderTimeNs ->
+                        if (source === videoDecoder && !isStopping.get()) performance.renderedFrame(renderTimeNs)
+                    }, Handler(Looper.getMainLooper()))
+                    codec.start()
+
+                    AppLogger.info(
+                        "Started ${codec.name} for $mimeType (${streamWidth}x${streamHeight} @ ${streamFps}fps, " +
+                            "low latency: ${latencyKey ?: "off"})", TAG
+                    )
+                    videoDecoder = codec
+                    isRunning.set(true)
+                    isStopping.set(false)
+                    startRendererThread()
+                    return MoonBridge.DR_OK
+                } catch (e: Exception) {
+                    runCatching { codecToRelease?.release() }
+                    failure = e.message ?: "Failed to initialize decoder"
+                    AppLogger.warn("Could not start ${candidate?.name ?: mimeType} (${latencyKey ?: "default"}): $failure", TAG)
+                }
+            }
+        }
+        listener?.onDecoderError(failure)
+        return -1
     }
 
     fun start() {
