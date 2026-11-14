@@ -57,6 +57,14 @@ enum class SystemKeyCaptureMode(val displayName: String) {
 }
 
 @Serializable
+enum class FramePacingMode(val displayName: String, val subtitle: String) {
+    MIN_LATENCY("Prefer lowest latency", "Drop backed-up frames and render immediately"),
+    BALANCED("Balanced", "Synchronize frame presentation with display VSync via Choreographer"),
+    CAP_FPS("Balanced with FPS limit", "Limit display refresh rate to match stream FPS and avoid SurfaceFlinger drops"),
+    MAX_SMOOTHNESS("Prefer smoothness", "Never allow SurfaceFlinger to drop late frames (may increase latency)")
+}
+
+@Serializable
 data class StreamSettings(
     val width: Int = 1920,
     val height: Int = 1080,
@@ -71,6 +79,7 @@ data class StreamSettings(
     val swapWinAltKeys: Boolean = false,
     val enableVsync: Boolean = true,
     val enableFramePacing: Boolean = true,
+    val framePacingMode: FramePacingMode = FramePacingMode.BALANCED,
     val optimizeGameSettings: Boolean = true,
     val quitAppOnStop: Boolean = false,
     val mouseSensitivity: Double = 1.0,
@@ -90,11 +99,28 @@ data class StreamSettings(
     val enableAudioEffects: Boolean = false
 ) {
     val isNativeResolution: Boolean get() = width == 0 && height == 0
+    val isCutoutSafeNativeResolution: Boolean get() = width == -1 && height == -1
 
-    fun resolveNativeResolution(displayWidth: Int, displayHeight: Int): StreamSettings {
+    val effectiveFramePacingMode: FramePacingMode
+        get() = if (!enableFramePacing) FramePacingMode.MIN_LATENCY else framePacingMode
+
+    fun resolveNativeResolution(
+        displayWidth: Int,
+        displayHeight: Int,
+        safeDisplayWidth: Int = displayWidth,
+        safeDisplayHeight: Int = displayHeight
+    ): StreamSettings {
+        if (isCutoutSafeNativeResolution) {
+            return copy(
+                width = maxOf(safeDisplayWidth, safeDisplayHeight) / 2 * 2,
+                height = minOf(safeDisplayWidth, safeDisplayHeight) / 2 * 2
+            )
+        }
         if (!isNativeResolution) return this
-        return copy(width = maxOf(displayWidth, displayHeight) / 2 * 2,
-            height = minOf(displayWidth, displayHeight) / 2 * 2)
+        return copy(
+            width = maxOf(displayWidth, displayHeight) / 2 * 2,
+            height = minOf(displayWidth, displayHeight) / 2 * 2
+        )
     }
 
     fun streamBitrateKbps(isRemote: Boolean): Int {
@@ -105,7 +131,9 @@ data class StreamSettings(
 
     val validationMessage: String?
         get() {
-            if (!isNativeResolution && (width !in 256..8192 || height !in 256..8192 || width % 2 != 0 || height % 2 != 0)) {
+            if (!isNativeResolution && !isCutoutSafeNativeResolution &&
+                (width !in 256..8192 || height !in 256..8192 || width % 2 != 0 || height % 2 != 0)
+            ) {
                 return "Resolution must use even dimensions between 256 and 8192, or Native."
             }
             if (fps !in 1..500) return "Frame rate must be between 1 and 500 FPS."

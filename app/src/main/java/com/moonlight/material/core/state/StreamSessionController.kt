@@ -124,8 +124,44 @@ class StreamSessionController(
     private val clipboardSync = ClipboardSyncManager(httpClient)
     private var hasAppFocus = true
     var displayRefreshRate: () -> Float = { 60f }
+    var displayAppVsyncOffsetNanos: () -> Long = { 0L }
     var displaySupportsHdr10: () -> Boolean = { true }
     var displayRotation: () -> Int = { Surface.ROTATION_90 }
+
+    companion object {
+        private const val TOMBSTONE_PREFS_NAME = "DecoderTombstone"
+        private const val TOMBSTONE_CRASH_COUNT_KEY = "CrashCount"
+    }
+
+    private fun recordDecoderTombstoneCrash() {
+        val ctx = applicationContext ?: return
+        try {
+            val prefs = ctx.getSharedPreferences(TOMBSTONE_PREFS_NAME, Context.MODE_PRIVATE)
+            val crashes = prefs.getInt(TOMBSTONE_CRASH_COUNT_KEY, 0) + 1
+            prefs.edit().putInt(TOMBSTONE_CRASH_COUNT_KEY, crashes).apply()
+            AppLogger.warn("Recorded hardware decoder crash tombstone (count=$crashes)", TAG)
+        } catch (_: Throwable) {}
+    }
+
+    private fun resetDecoderTombstoneIfClean() {
+        val ctx = applicationContext ?: return
+        try {
+            val prefs = ctx.getSharedPreferences(TOMBSTONE_PREFS_NAME, Context.MODE_PRIVATE)
+            if (prefs.getInt(TOMBSTONE_CRASH_COUNT_KEY, 0) != 0) {
+                prefs.edit().putInt(TOMBSTONE_CRASH_COUNT_KEY, 0).apply()
+            }
+        } catch (_: Throwable) {}
+    }
+
+    private fun hasDecoderTombstoneCrash(): Boolean {
+        val ctx = applicationContext ?: return false
+        return try {
+            val prefs = ctx.getSharedPreferences(TOMBSTONE_PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.getInt(TOMBSTONE_CRASH_COUNT_KEY, 0) > 0
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
     private inner class Controller(val slot: Int, var device: InputDevice) {
         val handler = GamepadHandler(
@@ -667,7 +703,16 @@ class StreamSessionController(
                     )
                 }
                 val probedFormats = codecProbe?.supportedVideoFormats ?: requestedMask
-                val probedCapabilities = codecProbe?.videoCapabilities ?: MoonBridge.CAPABILITY_DIRECT_SUBMIT
+                val tombstoneTriggered = hasDecoderTombstoneCrash()
+                if (tombstoneTriggered) {
+                    AppLogger.warn("Previous session experienced a hardware decoder crash; disabling Reference Frame Invalidation", TAG)
+                }
+                val rfiMask = MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC or
+                    MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC or
+                    MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_AV1
+                val probedCapabilities = ((codecProbe?.videoCapabilities ?: MoonBridge.CAPABILITY_DIRECT_SUBMIT)).let { caps ->
+                    if (tombstoneTriggered) caps and rfiMask.inv() else caps
+                }
                 val streamColorSpace = if ((probedFormats and MoonBridge.VIDEO_FORMAT_MASK_10BIT) != 0) {
                     MoonBridge.COLORSPACE_REC_2020
                 } else {
@@ -682,12 +727,15 @@ class StreamSessionController(
                     streamFps = settings.fps,
                     enablePacing = settings.enableFramePacing,
                     enableVsync = settings.enableVsync,
+                    framePacingMode = settings.effectiveFramePacingMode,
+                    appVsyncOffsetNanos = displayAppVsyncOffsetNanos(),
                     fullRangeColor = settings.fullRangeColor,
                     colorSpace = streamColorSpace,
                     refFrameInvalidationAvc = (probedCapabilities and MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC) != 0,
                     refFrameInvalidationHevc = (probedCapabilities and MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC) != 0,
                     refFrameInvalidationAv1 = (probedCapabilities and MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_AV1) != 0,
                     decoderPreference = settings.features.decoder,
+                    onCrashDetected = { recordDecoderTombstoneCrash() },
                     listener = this@StreamSessionController
                 )
                 audioEngine = AudioPlaybackEngine(
@@ -922,6 +970,23 @@ class StreamSessionController(
             }
 
             withContext(Dispatchers.Main) {
+                val finalSnapshot = videoDecoder?.performance?.snapshot()
+                val renderedFrames = videoDecoder?.totalFramesRendered ?: 0L
+                val showLatencyToast = activeSettings?.features?.enableLatencyToast == true
+                if (_sessionError.value == null && renderedFrames > 0L) {
+                    resetDecoderTombstoneIfClean()
+                }
+                if (showLatencyToast && renderedFrames > 0L && finalSnapshot != null) {
+                    applicationContext?.let { ctx ->
+                        val msg = String.format(
+                            java.util.Locale.US,
+                            "Average decode latency: %.2f ms (%.1f FPS)",
+                            finalSnapshot.decodeTimeMs,
+                            finalSnapshot.renderedFps
+                        )
+                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                    }
+                }
                 videoDecoder?.stop()
                 videoDecoder = null
                 audioEngine?.stop()

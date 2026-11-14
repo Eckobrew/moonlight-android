@@ -1,5 +1,8 @@
 package com.moonlight.material.ui.settings
 
+import android.content.Context
+import android.hardware.display.DisplayManager
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -123,27 +127,187 @@ fun SettingsScreen(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings) -> Unit) {
-    SectionCard(title = "Resolution & Refresh Rate") {
-        // Preset Resolutions
-        val resolutions = listOf(
-            Pair("Native", Pair(0, 0)),
-            Pair("720p (1280x720)", Pair(1280, 720)),
-            Pair("1080p (1920x1080)", Pair(1920, 1080)),
-            Pair("1440p (2560x1440)", Pair(2560, 1440)),
-            Pair("4K UHD (3840x2160)", Pair(3840, 2160))
-        )
+    val context = LocalContext.current
+    var showCustomResDialog by remember { mutableStateOf(false) }
+    var customWidthText by remember { mutableStateOf("") }
+    var customHeightText by remember { mutableStateOf("") }
+    var customResError by remember { mutableStateOf<String?>(null) }
 
-        Text("Resolution", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+    val displayResolutions = remember(context) {
+        val list = mutableListOf<Pair<String, Pair<Int, Int>>>()
+        list.add("Native" to (0 to 0))
+        list.add("Native (No Notch)" to (-1 to -1))
+        try {
+            val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            val seen = mutableSetOf<Pair<Int, Int>>()
+            dm?.displays?.forEach { display ->
+                display.supportedModes.forEach { mode ->
+                    val w = maxOf(mode.physicalWidth, mode.physicalHeight) / 2 * 2
+                    val h = minOf(mode.physicalWidth, mode.physicalHeight) / 2 * 2
+                    if (w >= 256 && h >= 256 && seen.add(w to h)) {
+                        if (w !in listOf(1280, 1920, 2560, 3840) || h !in listOf(720, 1080, 1440, 2160)) {
+                            list.add("Display (${w}x${h})" to (w to h))
+                        }
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val cutout = display.cutout
+                    if (cutout != null) {
+                        val mode = display.mode
+                        val rawW = maxOf(mode.physicalWidth, mode.physicalHeight)
+                        val rawH = minOf(mode.physicalWidth, mode.physicalHeight)
+                        val insetMajor = maxOf(cutout.safeInsetLeft + cutout.safeInsetRight, cutout.safeInsetTop + cutout.safeInsetBottom)
+                        val insetMinor = minOf(cutout.safeInsetLeft + cutout.safeInsetRight, cutout.safeInsetTop + cutout.safeInsetBottom)
+                        val safeW = ((rawW - insetMajor).coerceAtLeast(256)) / 2 * 2
+                        val safeH = ((rawH - insetMinor).coerceAtLeast(256)) / 2 * 2
+                        if ((safeW != rawW || safeH != rawH) && seen.add(safeW to safeH)) {
+                            list.add("Safe (${safeW}x${safeH})" to (safeW to safeH))
+                        }
+                    }
+                }
+            }
+        } catch (_: Throwable) {}
+        list
+    }
+
+    SectionCard(title = "Resolution & Refresh Rate") {
+        // Preset + Display + Custom Resolutions
+        val standardResolutions = listOf(
+            Pair("720p", Pair(1280, 720)),
+            Pair("1080p", Pair(1920, 1080)),
+            Pair("1440p", Pair(2560, 1440)),
+            Pair("4K UHD", Pair(3840, 2160))
+        )
+        val customParsed = settings.features.customResolutions.mapNotNull { entry ->
+            val parts = entry.lowercase().split("x")
+            if (parts.size == 2) {
+                val w = parts[0].trim().toIntOrNull()
+                val h = parts[1].trim().toIntOrNull()
+                if (w != null && h != null) Pair("${w}x${h}", Pair(w, h)) else null
+            } else null
+        }
+        val allResolutions = displayResolutions + standardResolutions + customParsed
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = when {
+                    settings.isNativeResolution -> "Resolution: Native (Full Display)"
+                    settings.isCutoutSafeNativeResolution -> "Resolution: Native (Cutout-Safe)"
+                    else -> "Resolution: ${settings.width}x${settings.height}"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary
+            )
+            TextButton(onClick = {
+                customWidthText = if (settings.width > 0) settings.width.toString() else "2400"
+                customHeightText = if (settings.height > 0) settings.height.toString() else "1080"
+                customResError = null
+                showCustomResDialog = true
+            }) {
+                Icon(Icons.Default.Add, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Custom", color = CyanAccent)
+            }
+        }
         Spacer(modifier = Modifier.height(6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            resolutions.forEach { (label, dims) ->
+            allResolutions.distinctBy { it.second }.forEach { (label, dims) ->
                 val isSelected = settings.width == dims.first && settings.height == dims.second
+                val isCustom = settings.features.customResolutions.contains("${dims.first}x${dims.second}")
                 FilterChip(
                     selected = isSelected,
                     onClick = { onUpdate(settings.copy(width = dims.first, height = dims.second)) },
-                    label = { Text(label.split(" ")[0]) }
+                    label = { Text(label) },
+                    trailingIcon = if (isCustom) {
+                        {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Remove custom resolution",
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable {
+                                        val updatedList = settings.features.customResolutions - "${dims.first}x${dims.second}"
+                                        val nextW = if (isSelected) 1920 else settings.width
+                                        val nextH = if (isSelected) 1080 else settings.height
+                                        onUpdate(
+                                            settings.copy(
+                                                width = nextW,
+                                                height = nextH,
+                                                features = settings.features.copy(customResolutions = updatedList)
+                                            )
+                                        )
+                                    }
+                            )
+                        }
+                    } else null
                 )
             }
+        }
+
+        if (showCustomResDialog) {
+            AlertDialog(
+                onDismissRequest = { showCustomResDialog = false },
+                containerColor = MidnightBlue,
+                title = { Text("Add Custom Resolution", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Enter even width and height between 256 and 8192:", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = customWidthText,
+                                onValueChange = { customWidthText = it.filter(Char::isDigit) },
+                                label = { Text("Width") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = customHeightText,
+                                onValueChange = { customHeightText = it.filter(Char::isDigit) },
+                                label = { Text("Height") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (customResError != null) {
+                            Text(customResError!!, color = RoseError, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val w = customWidthText.toIntOrNull()
+                            val h = customHeightText.toIntOrNull()
+                            if (w == null || h == null || w !in 256..8192 || h !in 256..8192 || w % 2 != 0 || h % 2 != 0) {
+                                customResError = "Width and height must be even numbers between 256 and 8192."
+                            } else {
+                                val resKey = "${w}x${h}"
+                                val updatedCustom = (settings.features.customResolutions + resKey).distinct()
+                                onUpdate(
+                                    settings.copy(
+                                        width = w,
+                                        height = h,
+                                        features = settings.features.copy(customResolutions = updatedCustom)
+                                    )
+                                )
+                                showCustomResDialog = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
+                    ) {
+                        Text("Add & Select", color = DeepNavy, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCustomResDialog = false }) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -248,11 +412,31 @@ private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
             onCheckedChange = { onUpdate(settings.copy(enableVsync = it)) }
         )
 
-        SettingToggle(
-            title = "Enable Frame Pacing",
-            checked = settings.enableFramePacing,
-            onCheckedChange = { onUpdate(settings.copy(enableFramePacing = it)) }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Frame Pacing", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+        Text(
+            text = settings.effectiveFramePacingMode.subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary
         )
+        Spacer(modifier = Modifier.height(6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FramePacingMode.entries.forEach { mode ->
+                val isSelected = settings.effectiveFramePacingMode == mode
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        onUpdate(
+                            settings.copy(
+                                enableFramePacing = mode != FramePacingMode.MIN_LATENCY,
+                                framePacingMode = mode
+                            )
+                        )
+                    },
+                    label = { Text(mode.displayName) }
+                )
+            }
+        }
 
         SettingToggle(
             title = "YUV 4:4:4 Chroma Subsampling",
@@ -265,6 +449,13 @@ private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
             subtitle = "Ignore aspect ratio and fill the entire display including notch areas",
             checked = settings.features.stretchToFit,
             onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(stretchToFit = it))) }
+        )
+
+        SettingToggle(
+            title = "Show Post-Stream Latency Message",
+            subtitle = "Display average hardware decode latency when the stream ends",
+            checked = settings.features.enableLatencyToast,
+            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(enableLatencyToast = it))) }
         )
     }
 }

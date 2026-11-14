@@ -45,5 +45,7 @@ data class ClientFeatures(
     val stickDeadzonePercent: Int = 7,
     val vibrateFallbackToDevice: Boolean = true,
     val gamepadMotionFallbackToDevice: Boolean = false,
-    val showToggleControllerButton: Boolean = true
+    val showToggleControllerButton: Boolean = true,
+    val customResolutions: List<String> = emptyList(),
+    val enableLatencyToast: Boolean = false
 )

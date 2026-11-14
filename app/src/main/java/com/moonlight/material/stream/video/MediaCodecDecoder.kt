@@ -14,6 +14,7 @@ import android.view.Choreographer
 import android.view.Surface
 import com.moonlight.material.bridge.MoonBridge
 import com.moonlight.material.core.models.DecoderPreference
+import com.moonlight.material.core.models.FramePacingMode
 import com.moonlight.material.core.utils.AppLogger
 import org.jcodec.codecs.h264.H264Utils
 import org.jcodec.codecs.h264.io.model.SeqParameterSet
@@ -46,12 +47,15 @@ class MediaCodecDecoder(
     private var streamFps: Int,
     private val enablePacing: Boolean = false,
     private val enableVsync: Boolean = true,
+    private val framePacingMode: FramePacingMode = if (enablePacing) FramePacingMode.BALANCED else FramePacingMode.MIN_LATENCY,
+    private val appVsyncOffsetNanos: Long = 0L,
     private val fullRangeColor: Boolean = false,
     private val colorSpace: Int = MoonBridge.COLORSPACE_REC_709,
     private val refFrameInvalidationAvc: Boolean = false,
     private val refFrameInvalidationHevc: Boolean = false,
     private val refFrameInvalidationAv1: Boolean = false,
     private val decoderPreference: DecoderPreference = DecoderPreference.AUTOMATIC,
+    private val onCrashDetected: (() -> Unit)? = null,
     private val listener: VideoDecoderListener? = null
 ) : Choreographer.FrameCallback {
     private val TAG = "MediaCodecDecoder"
@@ -407,7 +411,7 @@ class MediaCodecDecoder(
     }
 
     private fun startChoreographerIfNeeded() {
-        if (enablePacing && enableVsync && choreographerHandlerThread == null) {
+        if (framePacingMode == FramePacingMode.BALANCED && enableVsync && choreographerHandlerThread == null) {
             val thread = HandlerThread(
                 "Video - Choreographer",
                 Process.THREAD_PRIORITY_DEFAULT + Process.THREAD_PRIORITY_MORE_FAVORABLE
@@ -426,14 +430,15 @@ class MediaCodecDecoder(
 
         doCodecRecoveryIfRequired(CR_FLAG_CHOREOGRAPHER)
 
+        val actualFrameTimeNanos = frameTimeNanos - appVsyncOffsetNanos
         // Allow frame within 80% of frame period to avoid microstutter on VSync jitter
         val frameIntervalNs = 800_000_000L / streamFps.coerceAtLeast(1)
-        if (frameTimeNanos - lastRenderedFrameTimeNanos >= frameIntervalNs) {
+        if (actualFrameTimeNanos - lastRenderedFrameTimeNanos >= frameIntervalNs) {
             val nextOutputBuffer = outputBufferQueue.poll()
             if (nextOutputBuffer != null) {
                 try {
-                    videoDecoder?.releaseOutputBuffer(nextOutputBuffer, frameTimeNanos)
-                    lastRenderedFrameTimeNanos = frameTimeNanos
+                    videoDecoder?.releaseOutputBuffer(nextOutputBuffer, actualFrameTimeNanos)
+                    lastRenderedFrameTimeNanos = actualFrameTimeNanos
                     totalFramesRendered++
                 } catch (_: IllegalStateException) {
                     try {
@@ -565,6 +570,7 @@ class MediaCodecDecoder(
                         // Request IDR after recovery
                         MoonBridge.requestIdrFrame()
                     } else {
+                        onCrashDetected?.invoke()
                         listener?.onDecoderError("Video decoder recovery failed after $CR_MAX_TRIES attempts")
                     }
                     codecRecoveryType.set(CR_RECOVERY_TYPE_NONE)
@@ -893,7 +899,7 @@ class MediaCodecDecoder(
                         var lastPtsUs = bufferInfo.presentationTimeUs
                         var lastFlags = bufferInfo.flags
 
-                        if (enablePacing && enableVsync && choreographerHandlerThread != null) {
+                        if (framePacingMode == FramePacingMode.BALANCED && enableVsync && choreographerHandlerThread != null) {
                             // Balanced Choreographer mode: queue up to OUTPUT_BUFFER_QUEUE_LIMIT
                             val isFrame = (lastFlags and (MediaCodec.BUFFER_FLAG_CODEC_CONFIG or MediaCodec.BUFFER_FLAG_END_OF_STREAM)) == 0
                             if (isFrame) {
@@ -910,7 +916,7 @@ class MediaCodecDecoder(
                                 codec.releaseOutputBuffer(lastIndex, false)
                             }
                         } else {
-                            // Minimum latency / unpaced / non-Choreographer mode:
+                            // MIN_LATENCY, CAP_FPS, MAX_SMOOTHNESS, or VSync disabled:
                             // Drain any newer output buffers that are already ready so only the newest frame renders.
                             while (!isStopping.get()) {
                                 val nextIndex = codec.dequeueOutputBuffer(bufferInfo, 0L)
@@ -930,12 +936,19 @@ class MediaCodecDecoder(
                             if (isFrame) {
                                 val decodeMs = performance.decodedFrame(lastPtsUs)
                                 listener?.onFrameDecoded(decodeMs ?: 0.0)
-                                if (enablePacing) {
-                                    // Smoothness / Paced without Choreographer: timestamp 0 or paced timestamp
-                                    codec.releaseOutputBuffer(lastIndex, pacer.calculateReleaseTimeNs())
-                                } else {
-                                    // Minimum latency mode: render immediately with current nanoTime
-                                    codec.releaseOutputBuffer(lastIndex, System.nanoTime())
+                                when (framePacingMode) {
+                                    FramePacingMode.CAP_FPS, FramePacingMode.MAX_SMOOTHNESS -> {
+                                        // Timestamp 0 tells SurfaceFlinger to never drop late frames
+                                        codec.releaseOutputBuffer(lastIndex, 0L)
+                                    }
+                                    FramePacingMode.BALANCED -> {
+                                        // Balanced without Choreographer: use paced release timestamp
+                                        codec.releaseOutputBuffer(lastIndex, pacer.calculateReleaseTimeNs())
+                                    }
+                                    FramePacingMode.MIN_LATENCY -> {
+                                        // Minimum latency mode: render immediately with current nanoTime
+                                        codec.releaseOutputBuffer(lastIndex, System.nanoTime())
+                                    }
                                 }
                                 totalFramesRendered++
                             } else {

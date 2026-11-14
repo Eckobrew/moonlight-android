@@ -61,7 +61,18 @@ class StreamActivity : ComponentActivity() {
         val displaySize = android.graphics.Point()
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealSize(displaySize)
-        val settings = requestedSettings.resolveNativeResolution(displaySize.x, displaySize.y)
+        var safeWidth = displaySize.x
+        var safeHeight = displaySize.y
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val cutout = windowManager.defaultDisplay.cutout
+            if (cutout != null) {
+                val insetW = cutout.safeInsetLeft + cutout.safeInsetRight
+                val insetH = cutout.safeInsetTop + cutout.safeInsetBottom
+                safeWidth = (displaySize.x - insetW).coerceAtLeast(256)
+                safeHeight = (displaySize.y - insetH).coerceAtLeast(256)
+            }
+        }
+        val settings = requestedSettings.resolveNativeResolution(displaySize.x, displaySize.y, safeWidth, safeHeight)
         captureSystemKeysMode = settings.captureSystemKeys
         if (settings.keepScreenActive) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -70,9 +81,10 @@ class StreamActivity : ComponentActivity() {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val stretchOrFullScreen = settings.features.stretchToFit ||
+                requestedSettings.isNativeResolution ||
                 (displaySize.x == settings.width && displaySize.y == settings.height)
             window.attributes = window.attributes.apply {
-                layoutInDisplayCutoutMode = if (stretchOrFullScreen) {
+                layoutInDisplayCutoutMode = if (stretchOrFullScreen && !requestedSettings.isCutoutSafeNativeResolution) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                     } else {
@@ -84,7 +96,7 @@ class StreamActivity : ComponentActivity() {
             }
         }
         com.moonlight.material.core.utils.AppLogger.info(
-            "Requested ${if (requestedSettings.isNativeResolution) "Native" else "preset"} stream mode: ${settings.width}x${settings.height}x${settings.fps}", "SESSION")
+            "Requested ${if (requestedSettings.isNativeResolution) "Native" else if (requestedSettings.isCutoutSafeNativeResolution) "Native (Cutout-Safe)" else "preset"} stream mode: ${settings.width}x${settings.height}x${settings.fps}", "SESSION")
 
         val certManager = CertificateManager.getInstance()
         val httpClient = SunshineHTTPClient(certManager)
@@ -100,7 +112,10 @@ class StreamActivity : ComponentActivity() {
             val roundedRate = kotlin.math.round(it.refreshRate).toInt().coerceAtLeast(1)
             roundedRate >= settings.fps && (roundedRate % settings.fps <= 3 || abs(it.refreshRate - settings.fps) <= 3f)
         }
-        val bestMode = if (!settings.enableFramePacing) {
+        val pacingMode = settings.effectiveFramePacingMode
+        val bestMode = if (pacingMode == com.moonlight.material.core.models.FramePacingMode.MIN_LATENCY ||
+            pacingMode == com.moonlight.material.core.models.FramePacingMode.MAX_SMOOTHNESS
+        ) {
             matchingModes.maxByOrNull { it.refreshRate }
         } else {
             matchingModes.minByOrNull { it.refreshRate }
@@ -127,6 +142,7 @@ class StreamActivity : ComponentActivity() {
         }
         sessionController.applicationContext = applicationContext
         sessionController.displayRefreshRate = { bestMode?.refreshRate ?: display.refreshRate }
+        sessionController.displayAppVsyncOffsetNanos = { display.appVsyncOffsetNanos }
         sessionController.displayRotation = { windowManager.defaultDisplay.rotation }
         sessionController.displaySupportsHdr10 = {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {

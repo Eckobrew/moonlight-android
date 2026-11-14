@@ -167,7 +167,20 @@ fun StreamingScreen(
                     }
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
-                            val targetRate = if (!settings.enableFramePacing) {
+                            // Disable Surface producer throttling on Android 16+ (API 36+) to avoid compositor frame holdback
+                            if (Build.VERSION.SDK_INT >= 36) {
+                                try {
+                                    val method = android.view.Surface::class.java.getMethod(
+                                        "setProducerThrottlingEnabled",
+                                        Boolean::class.javaPrimitiveType
+                                    )
+                                    method.invoke(holder.surface, false)
+                                } catch (_: Throwable) {}
+                            }
+                            val pacingMode = settings.effectiveFramePacingMode
+                            val targetRate = if (pacingMode == com.moonlight.material.core.models.FramePacingMode.MIN_LATENCY ||
+                                pacingMode == com.moonlight.material.core.models.FramePacingMode.MAX_SMOOTHNESS
+                            ) {
                                 session.displayRefreshRate().coerceAtLeast(settings.fps.toFloat())
                             } else {
                                 settings.fps.toFloat()
