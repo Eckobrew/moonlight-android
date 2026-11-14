@@ -1,6 +1,7 @@
 package com.moonlight.material.core.state
 
 import android.content.Context
+import com.moonlight.material.core.utils.ClipboardSyncManager
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -107,7 +108,9 @@ class StreamSessionController(
     private var videoDecoder: MediaCodecDecoder? = null
     private var audioEngine: AudioPlaybackEngine? = null
 
-    var audioContext: Context? = null
+    var applicationContext: Context? = null
+    private val clipboardSync = ClipboardSyncManager(httpClient)
+    private var hasAppFocus = true
     var displayRefreshRate: () -> Float = { 60f }
     private inner class Controller(val slot: Int, var device: InputDevice) {
         val handler = GamepadHandler(this@StreamSessionController, controllerNumber = slot.toShort())
@@ -342,7 +345,9 @@ class StreamSessionController(
     }
 
     fun updateAppFocus(focused: Boolean) {
+        hasAppFocus = focused
         audioEngine?.updateFocus(focused)
+        updateClipboardSync()
     }
 
     fun startSession(
@@ -450,7 +455,7 @@ class StreamSessionController(
                 )
                 audioEngine = AudioPlaybackEngine(
                     muteOnFocusLoss = settings.muteAudioOnFocusLoss,
-                    audioEffectsContext = audioContext.takeIf { settings.enableAudioEffects }
+                    audioEffectsContext = applicationContext.takeIf { settings.enableAudioEffects }
                 )
 
                 // Register native bridge callbacks
@@ -571,7 +576,21 @@ class StreamSessionController(
         }
     }
 
+    private fun updateClipboardSync() {
+        val host = activeHost
+        val context = applicationContext
+        if (hasAppFocus && _currentStageName.value == "Connected" &&
+            currentSettings?.enableClipboardSync == true && host != null && context != null &&
+            host.capabilities?.allows((1L shl 16) or (1L shl 17)) == true &&
+            host.capabilities?.permission != null) {
+            clipboardSync.start(context, host)
+        } else {
+            clipboardSync.stop()
+        }
+    }
+
     private fun startConnectedServices() {
+        updateClipboardSync()
         stopMetricsPolling()
         startMetricsPolling()
     }
@@ -620,6 +639,7 @@ class StreamSessionController(
     }
 
     fun stopSession(forceQuitApp: Boolean? = null) {
+        clipboardSync.stop()
         touchMouseHandler.reset()
         controllers.values.forEach {
             it.handler.reset()

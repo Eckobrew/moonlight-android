@@ -88,7 +88,7 @@ class StreamActivity : ComponentActivity() {
             settings.width.toDouble() / settings.height in (1.0 / 2.39)..2.39) {
             streamAspectRatio = Rational(settings.width, settings.height)
         }
-        sessionController.audioContext = applicationContext
+        sessionController.applicationContext = applicationContext
         sessionController.displayRefreshRate = { display.refreshRate }
         sessionController.isShortcutMode = intent.getBooleanExtra("EXTRA_SHORTCUT_MODE", false)
 

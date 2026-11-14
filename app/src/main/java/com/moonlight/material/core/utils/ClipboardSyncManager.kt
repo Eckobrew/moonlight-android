@@ -6,6 +6,7 @@ import android.content.Context
 import com.moonlight.material.core.models.Host
 import com.moonlight.material.networking.SunshineHTTPClient
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,7 +27,7 @@ class ClipboardSyncManager(
     private var lastSyncedClipboard: String = ""
 
     private var pollJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private var scope: CoroutineScope? = null
     private var clipboardManager: ClipboardManager? = null
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
@@ -36,6 +37,8 @@ class ClipboardSyncManager(
     fun start(context: Context, host: Host) {
         stop()
 
+        val sessionScope = CoroutineScope(Dispatchers.Main + Job())
+        scope = sessionScope
         activeHost = host
         sendRetry = ClipboardRetryState()
         pullRetry = ClipboardRetryState()
@@ -59,7 +62,7 @@ class ClipboardSyncManager(
         syncClipboardFromHost()
 
         // Background polling for host clipboard updates
-        pollJob = scope.launch(Dispatchers.IO) {
+        pollJob = sessionScope.launch {
             while (isActive) {
                 delay(3000L)
                 syncClipboardFromHost()
@@ -68,6 +71,8 @@ class ClipboardSyncManager(
     }
 
     fun stop() {
+        scope?.cancel()
+        scope = null
         pollJob?.cancel()
         pollJob = null
         clipListener?.let { clipboardManager?.removePrimaryClipChangedListener(it) }
@@ -80,50 +85,50 @@ class ClipboardSyncManager(
 
     private fun syncClipboardToHost(text: String) {
         val host = activeHost ?: return
+        val sessionScope = scope ?: return
         val now = System.currentTimeMillis()
         if (isSending || !sendRetry.canAttempt(now)) return
 
         isSending = true
-        scope.launch(Dispatchers.IO) {
+        sessionScope.launch {
             try {
                 httpClient.sendClipboardContent(host, text)
                 sendRetry = sendRetry.succeeded()
                 lastSyncedClipboard = text
             } catch (e: Exception) {
-                if (e !is CancellationException) {
+                if (e is CancellationException) throw e
+                if (scope === sessionScope) {
                     sendRetry = sendRetry.failed(e, System.currentTimeMillis())
                 }
             } finally {
-                isSending = false
+                if (scope === sessionScope) isSending = false
             }
         }
     }
 
     private fun syncClipboardFromHost() {
         val host = activeHost ?: return
+        val sessionScope = scope ?: return
         val now = System.currentTimeMillis()
         if (isPulling || !pullRetry.canAttempt(now)) return
 
         isPulling = true
-        scope.launch(Dispatchers.IO) {
+        sessionScope.launch {
             try {
                 val content = httpClient.getClipboardContent(host)
                 pullRetry = pullRetry.succeeded()
                 if (content.isNotEmpty() && content != lastSyncedClipboard) {
                     lastSyncedClipboard = content
-                    scope.launch(Dispatchers.Main) {
-                        try {
-                            val clip = ClipData.newPlainText("Sunshine", content)
-                            clipboardManager?.setPrimaryClip(clip)
-                        } catch (_: Exception) {}
-                    }
+                    val clip = ClipData.newPlainText("Sunshine", content)
+                    clipboardManager?.setPrimaryClip(clip)
                 }
             } catch (e: Exception) {
-                if (e !is CancellationException) {
+                if (e is CancellationException) throw e
+                if (scope === sessionScope) {
                     pullRetry = pullRetry.failed(e, System.currentTimeMillis())
                 }
             } finally {
-                isPulling = false
+                if (scope === sessionScope) isPulling = false
             }
         }
     }
