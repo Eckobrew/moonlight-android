@@ -80,6 +80,7 @@ class StreamActivity : ComponentActivity() {
                 window.attributes = window.attributes.apply { preferredDisplayModeId = matchingMode.modeId }
             }
         }
+        sessionController.audioContext = applicationContext
         sessionController.displayRefreshRate = { display.refreshRate }
         sessionController.isShortcutMode = intent.getBooleanExtra("EXTRA_SHORTCUT_MODE", false)
 

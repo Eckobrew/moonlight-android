@@ -1,5 +1,8 @@
 package com.moonlight.material.stream.audio
 
+import android.content.Context
+import android.content.Intent
+import android.media.audiofx.AudioEffect
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -22,7 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - Focus management and background muting that survives engine recreation.
  */
 class AudioPlaybackEngine(
-    private var muteOnFocusLoss: Boolean = true
+    private var muteOnFocusLoss: Boolean = true,
+    private val audioEffectsContext: Context? = null
 ) : AudioOutputBackend {
 
     private val TAG = "AudioPlaybackEngine"
@@ -30,6 +34,7 @@ class AudioPlaybackEngine(
     private var audioTrack: AudioTrack? = null
     private val isTrackRunning = AtomicBoolean(false)
     private var isMuted = false
+    private var effectsSessionId: Int? = null
     private var lastBacklogLogMs = -1000L
     private var appFocused = true
 
@@ -80,7 +85,7 @@ class AudioPlaybackEngine(
 
         val nativeSampleRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC)
         for ((lowLatency, rawBufferSize) in attempts) {
-            if (lowLatency && nativeSampleRate != negotiatedSampleRate) continue
+            if (lowLatency && (audioEffectsContext != null || nativeSampleRate != negotiatedSampleRate)) continue
             val bufferSize = ((rawBufferSize + (bytesPerFrame - 1)) / bytesPerFrame) * bytesPerFrame
 
             var candidate: AudioTrack? = null
@@ -155,6 +160,10 @@ class AudioPlaybackEngine(
                 val track = audioTrack ?: return
                 if (track.playState != AudioTrack.PLAYSTATE_PLAYING) track.play()
                 isTrackRunning.set(true)
+                if (audioEffectsContext != null && effectsSessionId == null) {
+                    effectsSessionId = track.audioSessionId
+                    notifyAudioEffects(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION, track.audioSessionId)
+                }
             } catch (e: Exception) {
                 AppLogger.error("Failed to start AudioTrack: ${e.message}", TAG)
                 isTrackRunning.set(false)
@@ -165,6 +174,7 @@ class AudioPlaybackEngine(
     override fun stop() {
         synchronized(lock) {
             isTrackRunning.set(false)
+            closeAudioEffects()
             try {
                 audioTrack?.pause()
                 audioTrack?.flush()
@@ -184,8 +194,28 @@ class AudioPlaybackEngine(
         dispose()
     }
 
+    private fun closeAudioEffects() {
+        val sessionId = effectsSessionId ?: return
+        effectsSessionId = null
+        notifyAudioEffects(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION, sessionId)
+    }
+
+    private fun notifyAudioEffects(action: String, sessionId: Int) {
+        val context = audioEffectsContext ?: return
+        try {
+            context.sendBroadcast(Intent(action).apply {
+                putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_GAME)
+            })
+        } catch (e: RuntimeException) {
+            AppLogger.warn("Could not notify Android audio effects: ${e.message}", TAG)
+        }
+    }
+
     private fun disposeInternal() {
         isTrackRunning.set(false)
+        closeAudioEffects()
         audioTrack?.let { track ->
             try {
                 track.pause()

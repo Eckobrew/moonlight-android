@@ -1,5 +1,6 @@
 package com.moonlight.material.core.state
 
+import android.content.Context
 import android.view.InputDevice
 import android.view.Surface
 import com.moonlight.material.bridge.MoonBridge
@@ -101,6 +102,7 @@ class StreamSessionController(
     private var videoDecoder: MediaCodecDecoder? = null
     private var audioEngine: AudioPlaybackEngine? = null
 
+    var audioContext: Context? = null
     var displayRefreshRate: () -> Float = { 60f }
     val gamepadHandler = GamepadHandler(this)
     private var physicalController: InputDevice? = null
@@ -418,7 +420,10 @@ class StreamSessionController(
                     enablePacing = settings.enableFramePacing,
                     listener = this@StreamSessionController
                 )
-                audioEngine = AudioPlaybackEngine(muteOnFocusLoss = settings.muteAudioOnFocusLoss)
+                audioEngine = AudioPlaybackEngine(
+                    muteOnFocusLoss = settings.muteAudioOnFocusLoss,
+                    audioEffectsContext = audioContext.takeIf { settings.enableAudioEffects }
+                )
 
                 // Register native bridge callbacks
                 MoonBridge.connectionListener = this@StreamSessionController

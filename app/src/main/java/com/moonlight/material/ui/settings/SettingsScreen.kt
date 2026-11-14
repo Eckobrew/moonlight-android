@@ -268,6 +268,13 @@ private fun AudioSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
         Spacer(modifier = Modifier.height(16.dp))
 
         SettingToggle(
+            title = "Android Audio Effects",
+            subtitle = "Allows system equalizers to process stream audio and may increase latency",
+            checked = settings.enableAudioEffects,
+            onCheckedChange = { onUpdate(settings.copy(enableAudioEffects = it)) }
+        )
+
+        SettingToggle(
             title = "Mute Host PC Speakers While Streaming",
             checked = settings.muteHostAudio,
             onCheckedChange = { onUpdate(settings.copy(muteHostAudio = it)) }

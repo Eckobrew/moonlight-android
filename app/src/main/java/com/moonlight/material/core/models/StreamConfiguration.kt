@@ -86,7 +86,8 @@ data class StreamSettings(
     val mouseSubPixelAccumulation: Boolean = true,
     val muteAudioOnFocusLoss: Boolean = false,
     val features: ClientFeatures = ClientFeatures(),
-    val controllerMask: Short = 0
+    val controllerMask: Short = 0,
+    val enableAudioEffects: Boolean = false
 ) {
     val isNativeResolution: Boolean get() = width == 0 && height == 0
 
