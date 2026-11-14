@@ -1,5 +1,7 @@
 package com.moonlight.material.core.utils
 
+import android.system.OsConstants
+
 /**
  * Port of ConnectionDiagnostics.swift: provides human-readable diagnostic messages
  * for stage failures and connection termination error codes.
@@ -60,6 +62,12 @@ object ConnectionDiagnostics {
             ML_ERROR_PROTECTED_CONTENT -> "The host blocked protected content ($code). Close DRM-protected content and try again."
             ML_ERROR_UNEXPECTED_EARLY_TERMINATION -> "The host ended the stream shortly after it started ($code). Check Sunshine's capture/encoder logs and that a display is available; protected content is another possible cause."
             ML_ERROR_FRAME_CONVERSION -> "The host could not convert video ($code). Check HDR and display resolution settings."
+            -1 -> "The stream was interrupted ($code). Check the host and network before reconnecting."
+            OsConstants.ETIMEDOUT -> "The connection to the host timed out ($code). Check the network and reconnect."
+            OsConstants.ECONNRESET, OsConstants.ECONNABORTED, OsConstants.EPIPE ->
+                "The connection to the host was lost ($code). Check that the host is still running and reconnect."
+            OsConstants.ENETDOWN, OsConstants.ENETUNREACH, OsConstants.EHOSTUNREACH ->
+                "The host is unreachable ($code). Check your Wi-Fi, Ethernet or VPN connection."
             else -> "Connection ended ($code). Check the host and network."
         }
     }

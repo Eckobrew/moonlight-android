@@ -196,7 +196,11 @@ class StreamSessionController(
     fun handleTerminated(code: Int, customMessage: String? = null) {
         if (!_isStreaming.value) return
         _sessionError.value = customMessage ?: ConnectionDiagnostics.termination(code)
-        AppLogger.error("Native connection terminated ($code): ${_sessionError.value}", TAG)
+        if (_sessionError.value == null) {
+            AppLogger.info("Native connection ended normally ($code)", TAG)
+        } else {
+            AppLogger.error("Native connection terminated ($code): ${_sessionError.value}", TAG)
+        }
         stopSession(forceQuitApp = false)
     }
 
@@ -698,11 +702,8 @@ class StreamSessionController(
 
     override fun onConnectionTerminated(errorCode: Int) {
         val generation = sessionGeneration
-        if (errorCode != 0) nativeFailure = NativeFailure(generation, null, errorCode)
-        dispatchNativeEvent(generation) {
-            if (errorCode != 0) handleTerminated(errorCode)
-            else stopSession(forceQuitApp = false)
-        }
+        if (errorCode != ConnectionDiagnostics.ML_ERROR_GRACEFUL_TERMINATION) nativeFailure = NativeFailure(generation, null, errorCode)
+        dispatchNativeEvent(generation) { handleTerminated(errorCode) }
     }
 
     override fun onConnectionStatusUpdate(connectionStatus: Int) {
