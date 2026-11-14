@@ -278,6 +278,8 @@ fun StreamingScreen(
             VirtualTouchOverlay(
                 opacity = settings.features.touchOverlayOpacity,
                 swapFaceButtons = settings.features.swapFaceButtons,
+                hapticsEnabled = settings.features.touchHapticsEnabled,
+                showQuickToggleButton = settings.features.showToggleControllerButton,
                 listener = session
             )
         }

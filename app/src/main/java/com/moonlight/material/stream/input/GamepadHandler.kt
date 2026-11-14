@@ -69,8 +69,8 @@ class GamepadHandler(
     device: InputDevice? = null
 ) {
     companion object {
-        const val START_HOLD_MOUSE_MODE_MS = 750L
-        const val SELECT_HOLD_MENU_MS = 1500L
+        const val START_HOLD_MOUSE_MODE_MS = 3000L
+        const val SELECT_HOLD_MENU_MS = 3000L
         private const val MOUSE_EMULATION_TICK_RATE_HZ = 120
         private const val RAW_STICK_AXIS_MAX = 32766.0f
         private const val MOUSE_MOVE_BASE_SPEED_PX_PER_S = 1200.0f
