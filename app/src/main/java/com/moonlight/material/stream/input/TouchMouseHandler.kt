@@ -42,6 +42,15 @@ class TouchMouseHandler(
     private var downY = 0f
     private var multiTouch = false
     private var pointerCount = 0
+    private var lastTapUp = -1L
+    private var dragButton: Byte? = null
+
+    private fun endDrag(): Boolean {
+        val button = dragButton ?: return false
+        dragButton = null
+        listener.onMouseButton(button, false)
+        return true
+    }
     private val physicalMotion = RelativeMouseMotion()
     private var physicalButtons = 0
 
@@ -76,6 +85,8 @@ class TouchMouseHandler(
 
     fun reset() {
         releasePhysicalMouse()
+        endDrag()
+        lastTapUp = -1L
         if (nativePenActive) listener.onNativePen(7, 0, 0, 0f, 0f, 0f, 0f, 0f, -1)
         nativePenActive = false
         if (nativeTouchActive) listener.onNativeTouch(7, 0, 0f, 0f, 0f, 0f, 0f)
@@ -176,7 +187,14 @@ class TouchMouseHandler(
             MotionEvent.ACTION_DOWN -> {
                 lastX = event.x
                 lastY = event.y
-                downTime = System.currentTimeMillis()
+                downTime = event.eventTime
+                if (isDesktopMouseMode && lastTapUp >= 0 &&
+                    downTime - lastTapUp <= android.view.ViewConfiguration.getDoubleTapTimeout()) {
+                    val button = if (swapMouseButtons) MouseButtonCodes.BUTTON_RIGHT else MouseButtonCodes.BUTTON_LEFT
+                    dragButton = button
+                    listener.onMouseButton(button, true)
+                }
+                lastTapUp = -1L
                 downX = event.x
                 downY = event.y
                 multiTouch = false
@@ -194,6 +212,7 @@ class TouchMouseHandler(
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
+                endDrag()
                 multiTouch = true
                 lastY = event.y
                 return true
@@ -250,7 +269,8 @@ class TouchMouseHandler(
             }
 
             MotionEvent.ACTION_UP -> {
-                val elapsed = System.currentTimeMillis() - downTime
+                if (endDrag()) return true
+                val elapsed = event.eventTime - downTime
                 val distance = hypot((event.x - downX).toDouble(), (event.y - downY).toDouble())
 
                 // Quick tap detection: primary click
@@ -258,13 +278,14 @@ class TouchMouseHandler(
                     val leftBtn = if (swapMouseButtons) MouseButtonCodes.BUTTON_RIGHT else MouseButtonCodes.BUTTON_LEFT
                     listener.onMouseButton(leftBtn, true)
                     listener.onMouseButton(leftBtn, false)
+                    if (isDesktopMouseMode) lastTapUp = event.eventTime
                 }
                 return true
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
                 if (pointerCount == 2) {
-                    val elapsed = System.currentTimeMillis() - downTime
+                    val elapsed = event.eventTime - downTime
                     if (elapsed < 250) {
                         // Two finger tap: secondary (right) click
                         val rightBtn = if (swapMouseButtons) MouseButtonCodes.BUTTON_LEFT else MouseButtonCodes.BUTTON_RIGHT
