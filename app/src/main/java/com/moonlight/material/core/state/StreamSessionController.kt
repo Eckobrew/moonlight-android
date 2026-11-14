@@ -203,10 +203,100 @@ class StreamSessionController(
     private var advertisedControllers = 0
     private var registeredControllers = 0
     private var lastControllerError: Int? = null
+    private var virtualOscState: ControllerState? = null
+    private var oscRetransmitJob: Job? = null
+    private var lastAggregatedStateBySlot = mutableMapOf<Int, ControllerState>()
     private val controllerLimit: Int
         get() = if (activeHost?.appVersion?.substringAfterLast('.')?.toIntOrNull()?.let { it < 0 } == true) 16 else 4
 
     private fun controllerMask() = controllers.values.fold(0) { mask, controller -> mask or (1 shl controller.slot) }
+
+    private fun maxMagnitudeByte(a: Byte, b: Byte): Byte {
+        val ua = a.toInt() and 0xFF
+        val ub = b.toInt() and 0xFF
+        return maxOf(ua, ub).toByte()
+    }
+
+    private fun maxMagnitudeShort(a: Short, b: Short): Short {
+        return if (kotlin.math.abs(a.toInt()) >= kotlin.math.abs(b.toInt())) a else b
+    }
+
+    private fun aggregateControllerStates(states: List<ControllerState>): ControllerState {
+        var buttons = 0
+        var lt: Byte = 0
+        var rt: Byte = 0
+        var lx: Short = 0
+        var ly: Short = 0
+        var rx: Short = 0
+        var ry: Short = 0
+        for (s in states) {
+            buttons = buttons or s.buttons
+            lt = maxMagnitudeByte(lt, s.leftTrigger)
+            rt = maxMagnitudeByte(rt, s.rightTrigger)
+            lx = maxMagnitudeShort(lx, s.leftX)
+            ly = maxMagnitudeShort(ly, s.leftY)
+            rx = maxMagnitudeShort(rx, s.rightX)
+            ry = maxMagnitudeShort(ry, s.rightY)
+        }
+        return ControllerState(buttons, lt, rt, lx, ly, rx, ry)
+    }
+
+    fun onVirtualControllerStateChanged(
+        buttonFlags: Int,
+        leftTrigger: Byte,
+        rightTrigger: Byte,
+        leftStickX: Short,
+        leftStickY: Short,
+        rightStickX: Short,
+        rightStickY: Short
+    ) {
+        virtualOscState = ControllerState(buttonFlags, leftTrigger, rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY)
+        if (!_isStreaming.value || _currentStageName.value != "Connected" || controllerPermissionDenied) return
+        dispatchSlotState(slot = 0, forceSend = false)
+        // Retransmit Virtual Controller UDP state at +25ms, +50ms, and +75ms so dropped UDP packets never leave sticks or buttons stuck
+        oscRetransmitJob?.cancel()
+        oscRetransmitJob = scope.launch {
+            repeat(3) {
+                delay(25L)
+                if (!_isStreaming.value || _currentStageName.value != "Connected") return@launch
+                dispatchSlotState(slot = 0, forceSend = true)
+            }
+        }
+    }
+
+    private fun dispatchSlotState(slot: Int, forceSend: Boolean = false) {
+        val slotStates = mutableListOf<ControllerState>()
+        controllers.values.forEach { c ->
+            if (c.slot == slot) {
+                c.state?.let { slotStates.add(it) }
+            }
+        }
+        if (slot == 0) {
+            virtualOscState?.let { slotStates.add(it) }
+        }
+        val combined = if (slotStates.isEmpty()) {
+            ControllerState(0, 0, 0, 0, 0, 0, 0)
+        } else {
+            aggregateControllerStates(slotStates)
+        }
+        if (!forceSend && lastAggregatedStateBySlot[slot] == combined) return
+        val keepSlot = if (currentSettings?.features?.persistentGamepad == true) 1 else 0
+        val mask = registeredControllers or (1 shl slot) or keepSlot
+        val result = MoonBridge.sendMultiControllerInput(
+            slot.toShort(),
+            mask.toShort(),
+            combined.buttons,
+            combined.leftTrigger,
+            combined.rightTrigger,
+            combined.leftX,
+            combined.leftY,
+            combined.rightX,
+            combined.rightY
+        )
+        if (checkControllerResult("send input for", result)) {
+            lastAggregatedStateBySlot[slot] = combined
+        }
+    }
 
     private data class ControllerState(
         val buttons: Int,
@@ -246,12 +336,14 @@ class StreamSessionController(
             }
             return it.handler
         }
-        // Check if this is an associated DualShock/DualSense standalone touchpad InputDevice
+        // Check if this is an associated DualShock/DualSense standalone touchpad or split InputDevice
         if (device != null && !GamepadHandler.isGamepad(device) &&
             (device.sources and InputDevice.SOURCE_TOUCHPAD) == InputDevice.SOURCE_TOUCHPAD
         ) {
             val associated = controllers.values.firstOrNull {
                 it.device.descriptor == device.descriptor ||
+                    kotlin.math.abs(it.device.id - device.id) <= 1 &&
+                    it.device.vendorId == device.vendorId && it.device.productId == device.productId ||
                     (it.device.vendorId == device.vendorId && it.device.productId == device.productId)
             }
             if (associated != null) {
@@ -259,10 +351,15 @@ class StreamSessionController(
             }
         }
         if (device == null || !GamepadHandler.isGamepad(device)) return null
+        val multiControllerEnabled = currentSettings?.features?.multiController ?: true
         val occupied = controllerMask()
-        val slot = (0 until controllerLimit).firstOrNull { occupied and (1 shl it) == 0 } ?: return null
-        // Send removals before reusing a slot.
-        if (registeredControllers and (1 shl slot) != 0 && !syncControllerRegistration()) return null
+        val slot = if (!multiControllerEnabled) {
+            0
+        } else {
+            (0 until controllerLimit).firstOrNull { occupied and (1 shl it) == 0 } ?: return null
+        }
+        // Send removals before reusing a slot when multiController is enabled.
+        if (multiControllerEnabled && registeredControllers and (1 shl slot) != 0 && !syncControllerRegistration()) return null
         val controller = Controller(slot, device)
         controllers[deviceId] = controller
         currentSettings?.features?.let {
@@ -361,7 +458,9 @@ class StreamSessionController(
                     capabilities = capabilities or MoonBridge.LI_CCAP_RGB_LED.toInt()
                 }
             }
-            if ((device.sources and InputDevice.SOURCE_TOUCHPAD) == InputDevice.SOURCE_TOUCHPAD) {
+            if ((device.sources and InputDevice.SOURCE_TOUCHPAD) == InputDevice.SOURCE_TOUCHPAD &&
+                currentSettings?.features?.gamepadTouchpadAsMouse != true
+            ) {
                 capabilities = capabilities or MoonBridge.LI_CCAP_TOUCHPAD.toInt()
                 supportedButtons = supportedButtons or ControllerButtonFlags.TOUCHPAD
             }
@@ -953,6 +1052,10 @@ class StreamSessionController(
         }
         controllerRetryJob?.cancel()
         controllerRetryJob = null
+        oscRetransmitJob?.cancel()
+        oscRetransmitJob = null
+        virtualOscState = null
+        lastAggregatedStateBySlot.clear()
         advertisedControllers = 0
         registeredControllers = 0
         lastControllerError = null
@@ -1615,17 +1718,12 @@ class StreamSessionController(
     ) {
         if (!_isStreaming.value || _currentStageName.value != "Connected" || controllerPermissionDenied) return
         refreshControllerRegistration()
-        val controller = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }
+        val slot = controllerNumber.toInt()
+        val controller = controllers.values.firstOrNull { it.slot == slot }
         if (controller != null && registeredControllers and (1 shl controller.slot) == 0) return
         val state = ControllerState(buttonFlags, leftTrigger, rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY)
-        if (controller?.state == state) return
-        val keepSlot = if (currentSettings?.features?.persistentGamepad == true) 1 else 0
-        val mask = registeredControllers or (1 shl controllerNumber.toInt()) or keepSlot
-        val result = MoonBridge.sendMultiControllerInput(
-            controllerNumber, mask.toShort(), buttonFlags, leftTrigger, rightTrigger,
-            leftStickX, leftStickY, rightStickX, rightStickY
-        )
-        if (checkControllerResult("send input for", result)) controller?.state = state
+        controller?.state = state
+        dispatchSlotState(slot = slot, forceSend = false)
     }
 
     override fun onGamepadMenuRequested() {

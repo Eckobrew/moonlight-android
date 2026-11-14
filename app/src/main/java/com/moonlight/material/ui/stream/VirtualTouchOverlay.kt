@@ -107,7 +107,17 @@ fun VirtualTouchOverlay(
     swapFaceButtons: Boolean = false,
     hapticsEnabled: Boolean = true,
     showQuickToggleButton: Boolean = true,
-    listener: GamepadListener,
+    onlyL3R3: Boolean = false,
+    onStateChanged: ((
+        buttonFlags: Int,
+        leftTrigger: Byte,
+        rightTrigger: Byte,
+        leftStickX: Short,
+        leftStickY: Short,
+        rightStickX: Short,
+        rightStickY: Short
+    ) -> Unit)? = null,
+    listener: GamepadListener? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -157,16 +167,28 @@ fun VirtualTouchOverlay(
             faceButtonsMask or
             leftStickClickMask or
             rightStickClickMask
-        listener.onControllerStateChanged(
-            controllerNumber = 0,
-            buttonFlags = combinedButtons,
-            leftTrigger = leftTrigger,
-            rightTrigger = rightTrigger,
-            leftStickX = leftStickX,
-            leftStickY = leftStickY,
-            rightStickX = rightStickX,
-            rightStickY = rightStickY
-        )
+        if (onStateChanged != null) {
+            onStateChanged(
+                combinedButtons,
+                leftTrigger,
+                rightTrigger,
+                leftStickX,
+                leftStickY,
+                rightStickX,
+                rightStickY
+            )
+        } else {
+            listener?.onControllerStateChanged(
+                controllerNumber = 0,
+                buttonFlags = combinedButtons,
+                leftTrigger = leftTrigger,
+                rightTrigger = rightTrigger,
+                leftStickX = leftStickX,
+                leftStickY = leftStickY,
+                rightStickX = rightStickX,
+                rightStickY = rightStickY
+            )
+        }
     }
 
     fun clearAllInputs() {
@@ -185,9 +207,13 @@ fun VirtualTouchOverlay(
         emitControllerState()
     }
 
-    DisposableEffect(listener) {
+    DisposableEffect(listener, onStateChanged) {
         onDispose {
-            listener.onControllerStateChanged(0, 0, 0, 0, 0, 0, 0, 0)
+            if (onStateChanged != null) {
+                onStateChanged(0, 0, 0, 0, 0, 0, 0)
+            } else {
+                listener?.onControllerStateChanged(0, 0, 0, 0, 0, 0, 0, 0)
+            }
         }
     }
 
@@ -375,7 +401,7 @@ fun VirtualTouchOverlay(
                     placement = placements[OscElementId.LEFT_BUMPERS]!!,
                     screenWidthPx = screenWidthPx,
                     screenHeightPx = screenHeightPx,
-                    baseWidth = 196.dp,
+                    baseWidth = if (onlyL3R3) 64.dp else 196.dp,
                     baseHeight = 44.dp,
                     isEditing = isEditingLayout,
                     isSelected = selectedElement == OscElementId.LEFT_BUMPERS,
@@ -389,36 +415,38 @@ fun VirtualTouchOverlay(
                         horizontalArrangement = Arrangement.spacedBy((8 * scale).dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TouchShoulderButton(
-                            label = "LT",
-                            width = (62 * scale).dp,
-                            height = (40 * scale).dp,
-                            isTrigger = true,
-                            isEditing = isEditingLayout
-                        ) { isDown ->
-                            triggerHaptic(!isDown)
-                            leftTrigger = if (isDown) 255.toByte() else 0.toByte()
-                            emitControllerState()
-                        }
-                        TouchShoulderButton(
-                            label = "LB",
-                            width = (62 * scale).dp,
-                            height = (38 * scale).dp,
-                            isTrigger = false,
-                            isEditing = isEditingLayout
-                        ) { isDown ->
-                            triggerHaptic(!isDown)
-                            shoulderButtonsMask = if (isDown) {
-                                shoulderButtonsMask or ControllerButtonFlags.LB
-                            } else {
-                                shoulderButtonsMask and ControllerButtonFlags.LB.inv()
+                        if (!onlyL3R3) {
+                            TouchShoulderButton(
+                                label = "LT",
+                                width = (62 * scale).dp,
+                                height = (40 * scale).dp,
+                                isTrigger = true,
+                                isEditing = isEditingLayout
+                            ) { isDown ->
+                                triggerHaptic(!isDown)
+                                leftTrigger = if (isDown) 255.toByte() else 0.toByte()
+                                emitControllerState()
                             }
-                            emitControllerState()
+                            TouchShoulderButton(
+                                label = "LB",
+                                width = (62 * scale).dp,
+                                height = (38 * scale).dp,
+                                isTrigger = false,
+                                isEditing = isEditingLayout
+                            ) { isDown ->
+                                triggerHaptic(!isDown)
+                                shoulderButtonsMask = if (isDown) {
+                                    shoulderButtonsMask or ControllerButtonFlags.LB
+                                } else {
+                                    shoulderButtonsMask and ControllerButtonFlags.LB.inv()
+                                }
+                                emitControllerState()
+                            }
                         }
                         TouchShoulderButton(
                             label = "L3",
-                            width = (48 * scale).dp,
-                            height = (34 * scale).dp,
+                            width = (if (onlyL3R3) 56 * scale else 48 * scale).dp,
+                            height = (if (onlyL3R3) 38 * scale else 34 * scale).dp,
                             isTrigger = false,
                             isEditing = isEditingLayout
                         ) { isDown ->
@@ -439,7 +467,7 @@ fun VirtualTouchOverlay(
                     placement = placements[OscElementId.CENTER_BUTTONS]!!,
                     screenWidthPx = screenWidthPx,
                     screenHeightPx = screenHeightPx,
-                    baseWidth = 192.dp,
+                    baseWidth = if (onlyL3R3) 64.dp else 192.dp,
                     baseHeight = 36.dp,
                     isEditing = isEditingLayout,
                     isSelected = selectedElement == OscElementId.CENTER_BUTTONS,
@@ -453,19 +481,21 @@ fun VirtualTouchOverlay(
                         horizontalArrangement = Arrangement.spacedBy((10 * scale).dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TouchPillButton(
-                            label = "SELECT",
-                            width = (58 * scale).dp,
-                            height = (30 * scale).dp,
-                            isEditing = isEditingLayout
-                        ) { isDown ->
-                            triggerHaptic(!isDown)
-                            centerButtonsMask = if (isDown) {
-                                centerButtonsMask or ControllerButtonFlags.BACK
-                            } else {
-                                centerButtonsMask and ControllerButtonFlags.BACK.inv()
+                        if (!onlyL3R3) {
+                            TouchPillButton(
+                                label = "SELECT",
+                                width = (58 * scale).dp,
+                                height = (30 * scale).dp,
+                                isEditing = isEditingLayout
+                            ) { isDown ->
+                                triggerHaptic(!isDown)
+                                centerButtonsMask = if (isDown) {
+                                    centerButtonsMask or ControllerButtonFlags.BACK
+                                } else {
+                                    centerButtonsMask and ControllerButtonFlags.BACK.inv()
+                                }
+                                emitControllerState()
                             }
-                            emitControllerState()
                         }
                         TouchPillButton(
                             label = "GUIDE",
@@ -482,19 +512,21 @@ fun VirtualTouchOverlay(
                             }
                             emitControllerState()
                         }
-                        TouchPillButton(
-                            label = "START",
-                            width = (58 * scale).dp,
-                            height = (30 * scale).dp,
-                            isEditing = isEditingLayout
-                        ) { isDown ->
-                            triggerHaptic(!isDown)
-                            centerButtonsMask = if (isDown) {
-                                centerButtonsMask or ControllerButtonFlags.START
-                            } else {
-                                centerButtonsMask and ControllerButtonFlags.START.inv()
+                        if (!onlyL3R3) {
+                            TouchPillButton(
+                                label = "START",
+                                width = (58 * scale).dp,
+                                height = (30 * scale).dp,
+                                isEditing = isEditingLayout
+                            ) { isDown ->
+                                triggerHaptic(!isDown)
+                                centerButtonsMask = if (isDown) {
+                                    centerButtonsMask or ControllerButtonFlags.START
+                                } else {
+                                    centerButtonsMask and ControllerButtonFlags.START.inv()
+                                }
+                                emitControllerState()
                             }
-                            emitControllerState()
                         }
                     }
                 }
@@ -505,7 +537,7 @@ fun VirtualTouchOverlay(
                     placement = placements[OscElementId.RIGHT_BUMPERS]!!,
                     screenWidthPx = screenWidthPx,
                     screenHeightPx = screenHeightPx,
-                    baseWidth = 196.dp,
+                    baseWidth = if (onlyL3R3) 64.dp else 196.dp,
                     baseHeight = 44.dp,
                     isEditing = isEditingLayout,
                     isSelected = selectedElement == OscElementId.RIGHT_BUMPERS,
@@ -521,8 +553,8 @@ fun VirtualTouchOverlay(
                     ) {
                         TouchShoulderButton(
                             label = "R3",
-                            width = (48 * scale).dp,
-                            height = (34 * scale).dp,
+                            width = (if (onlyL3R3) 56 * scale else 48 * scale).dp,
+                            height = (if (onlyL3R3) 38 * scale else 34 * scale).dp,
                             isTrigger = false,
                             isEditing = isEditingLayout
                         ) { isDown ->
@@ -534,35 +566,38 @@ fun VirtualTouchOverlay(
                             }
                             emitControllerState()
                         }
-                        TouchShoulderButton(
-                            label = "RB",
-                            width = (62 * scale).dp,
-                            height = (38 * scale).dp,
-                            isTrigger = false,
-                            isEditing = isEditingLayout
-                        ) { isDown ->
-                            triggerHaptic(!isDown)
-                            shoulderButtonsMask = if (isDown) {
-                                shoulderButtonsMask or ControllerButtonFlags.RB
-                            } else {
-                                shoulderButtonsMask and ControllerButtonFlags.RB.inv()
+                        if (!onlyL3R3) {
+                            TouchShoulderButton(
+                                label = "RB",
+                                width = (62 * scale).dp,
+                                height = (38 * scale).dp,
+                                isTrigger = false,
+                                isEditing = isEditingLayout
+                            ) { isDown ->
+                                triggerHaptic(!isDown)
+                                shoulderButtonsMask = if (isDown) {
+                                    shoulderButtonsMask or ControllerButtonFlags.RB
+                                } else {
+                                    shoulderButtonsMask and ControllerButtonFlags.RB.inv()
+                                }
+                                emitControllerState()
                             }
-                            emitControllerState()
-                        }
-                        TouchShoulderButton(
-                            label = "RT",
-                            width = (62 * scale).dp,
-                            height = (40 * scale).dp,
-                            isTrigger = true,
-                            isEditing = isEditingLayout
-                        ) { isDown ->
-                            triggerHaptic(!isDown)
-                            rightTrigger = if (isDown) 255.toByte() else 0.toByte()
-                            emitControllerState()
+                            TouchShoulderButton(
+                                label = "RT",
+                                width = (62 * scale).dp,
+                                height = (40 * scale).dp,
+                                isTrigger = true,
+                                isEditing = isEditingLayout
+                            ) { isDown ->
+                                triggerHaptic(!isDown)
+                                rightTrigger = if (isDown) 255.toByte() else 0.toByte()
+                                emitControllerState()
+                            }
                         }
                     }
                 }
 
+                if (!onlyL3R3) {
                 // 4. 8-Way D-Pad with smooth thumb slide/roll-over
                 OscDraggableCluster(
                     id = OscElementId.DPAD,
@@ -692,6 +727,7 @@ fun VirtualTouchOverlay(
                             }
                         }
                     )
+                }
                 }
             }
         }

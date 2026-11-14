@@ -112,9 +112,10 @@ fun SessionControlsSheet(
             StreamMenuButton(if (showHUD) "Hide Performance HUD" else "Show Performance HUD",
                 Icons.Default.Speed, onClick = { session.togglePerformanceOverlay() })
             StreamMenuButton(
-                if (controllerConnected) "Gamepad hidden: physical controller connected"
-                else if (controllerVisible) "Hide On-screen Gamepad" else "Show On-screen Gamepad",
-                Icons.Default.SportsEsports, enabled = !controllerConnected,
+                if (controllerVisible) "Hide On-Screen Gamepad"
+                else if (controllerConnected) "Show On-Screen Gamepad (Physical Connected)"
+                else "Show On-Screen Gamepad",
+                Icons.Default.SportsEsports,
                 onClick = { onToggleController(); onDismiss() })
 
             // Set Bitrate Section

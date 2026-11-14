@@ -71,6 +71,7 @@ fun StreamingScreen(
         }
     }
     var controllerEnabled by rememberSaveable { mutableStateOf(settings.features.touchOverlayEnabled) }
+    var forceShowOscWithPhysical by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     var physicalMouseConnected by remember { mutableStateOf(false) }
     var physicalControllerConnected by remember { mutableStateOf(false) }
@@ -311,12 +312,17 @@ fun StreamingScreen(
         }
 
         // Virtual Touch Overlay
-        if (controllerEnabled && !physicalControllerConnected && !showKeyboardOverlay && !showControlsSheet && stageName == "Connected") {
+        val showVirtualOsc = (controllerEnabled && (!physicalControllerConnected || settings.features.oscOnlyL3R3)) || forceShowOscWithPhysical
+        if (showVirtualOsc && !showKeyboardOverlay && !showControlsSheet && stageName == "Connected") {
             VirtualTouchOverlay(
                 opacity = settings.features.touchOverlayOpacity,
                 swapFaceButtons = settings.features.swapFaceButtons,
                 hapticsEnabled = settings.features.touchHapticsEnabled,
                 showQuickToggleButton = settings.features.showToggleControllerButton,
+                onlyL3R3 = settings.features.oscOnlyL3R3,
+                onStateChanged = { buttons, lt, rt, lx, ly, rx, ry ->
+                    session.onVirtualControllerStateChanged(buttons, lt, rt, lx, ly, rx, ry)
+                },
                 listener = session
             )
         }
@@ -350,11 +356,23 @@ fun StreamingScreen(
                 session = session,
                 app = app,
                 onShowKeyboard = { showKeyboardOverlay = true },
-                controllerVisible = controllerEnabled && !physicalControllerConnected,
+                controllerVisible = showVirtualOsc,
                 controllerConnected = physicalControllerConnected,
                 onToggleController = {
-                    controllerEnabled = !controllerEnabled
-                    onControllerVisibilityChanged(controllerEnabled)
+                    if (physicalControllerConnected) {
+                        if (showVirtualOsc) {
+                            forceShowOscWithPhysical = false
+                            controllerEnabled = false
+                            onControllerVisibilityChanged(false)
+                        } else {
+                            forceShowOscWithPhysical = true
+                            controllerEnabled = true
+                            onControllerVisibilityChanged(true)
+                        }
+                    } else {
+                        controllerEnabled = !controllerEnabled
+                        onControllerVisibilityChanged(controllerEnabled)
+                    }
                 },
                 onTouchModeChanged = onTouchModeChanged,
                 onFinish = onFinish,

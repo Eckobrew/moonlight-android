@@ -49,5 +49,8 @@ data class ClientFeatures(
     val customResolutions: List<String> = emptyList(),
     val enableLatencyToast: Boolean = false,
     val absoluteMouseMode: Boolean = false,
-    val mouseNavButtons: Boolean = true
+    val mouseNavButtons: Boolean = true,
+    val multiController: Boolean = true,
+    val gamepadTouchpadAsMouse: Boolean = false,
+    val oscOnlyL3R3: Boolean = false
 )

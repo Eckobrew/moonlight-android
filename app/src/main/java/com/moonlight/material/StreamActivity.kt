@@ -181,7 +181,8 @@ class StreamActivity : ComponentActivity() {
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (::sessionController.isInitialized && sessionController.canForwardGamepadInput) {
-            if (event.isFromSource(InputDevice.SOURCE_TOUCHPAD) &&
+            val touchpadAsMouse = sessionController.currentSettings?.features?.gamepadTouchpadAsMouse == true
+            if (!touchpadAsMouse && event.isFromSource(InputDevice.SOURCE_TOUCHPAD) &&
                 sessionController.controllerHandler(event.deviceId, event.device)?.tryHandleTouchpadEvent(event) == true
             ) {
                 return true
@@ -198,7 +199,15 @@ class StreamActivity : ComponentActivity() {
             event.isFromSource(InputDevice.SOURCE_TOUCHPAD) &&
             !event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)
         ) {
-            if (sessionController.controllerHandler(event.deviceId, event.device)?.tryHandleTouchpadEvent(event) == true) {
+            if (sessionController.currentSettings?.features?.gamepadTouchpadAsMouse == true) {
+                val viewW = window.decorView.width.coerceAtLeast(1)
+                val viewH = window.decorView.height.coerceAtLeast(1)
+                val prevMode = sessionController.touchMouseHandler.isDesktopMouseMode
+                sessionController.touchMouseHandler.isDesktopMouseMode = true
+                val handled = sessionController.touchMouseHandler.handleTouchEvent(event, viewW, viewH)
+                sessionController.touchMouseHandler.isDesktopMouseMode = prevMode
+                if (handled) return true
+            } else if (sessionController.controllerHandler(event.deviceId, event.device)?.tryHandleTouchpadEvent(event) == true) {
                 return true
             }
         }

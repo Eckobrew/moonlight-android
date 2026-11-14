@@ -617,12 +617,32 @@ private fun ControllerSettingsTab(settings: StreamSettings, onUpdate: (StreamSet
                 checked = settings.features.showToggleControllerButton,
                 onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(showToggleControllerButton = it))) }
             )
+
+            SettingToggle(
+                title = "Only Show L3, R3 & Guide Buttons",
+                subtitle = "Minimal overlay for physical controllers lacking clickable thumbsticks",
+                checked = settings.features.oscOnlyL3R3,
+                onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(oscOnlyL3R3 = it))) }
+            )
         }
     }
 
     Spacer(modifier = Modifier.height(16.dp))
 
     SectionCard(title = "Hardware Gamepad Options") {
+        SettingToggle(
+            title = "Auto-Assign Multiple Controllers",
+            subtitle = "Assign each connected controller to a separate player slot (when off, all controllers control Player 1)",
+            checked = settings.features.multiController,
+            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(multiController = it))) }
+        )
+
+        SettingToggle(
+            title = "Use Controller Touchpad as Mouse",
+            subtitle = "Use DualShock 4 / DualSense touchpad as a relative mouse trackpad instead of raw controller touch",
+            checked = settings.features.gamepadTouchpadAsMouse,
+            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(gamepadTouchpadAsMouse = it))) }
+        )
         Text("Analog Stick Deadzone: ${settings.features.stickDeadzonePercent}%", color = TextSecondary)
         Slider(
             value = settings.features.stickDeadzonePercent.toFloat(),
