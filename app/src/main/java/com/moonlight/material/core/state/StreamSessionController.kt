@@ -2,6 +2,8 @@ package com.moonlight.material.core.state
 
 import android.content.Context
 import android.view.InputDevice
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
 import android.view.Surface
 import com.moonlight.material.bridge.MoonBridge
 import com.moonlight.material.core.models.AppControl
@@ -705,16 +707,25 @@ class StreamSessionController(
         } catch (_: Throwable) {}
     }
 
-    fun handleKeyEvent(event: android.view.KeyEvent): Boolean {
-        if (!_isStreaming.value) return false
-        val isDown = event.action == android.view.KeyEvent.ACTION_DOWN
-        val hostKey = com.moonlight.material.stream.input.KeycodeMappings.hostKey(
+    fun handleKeyEvent(event: KeyEvent): Boolean {
+        if (!_isStreaming.value || localInputActive) return false
+        val isDown = event.action == KeyEvent.ACTION_DOWN
+        if (!isDown && event.action != KeyEvent.ACTION_UP) return false
+        val hostKey = KeycodeMappings.hostKey(
             androidKeyCode = event.keyCode,
             swapWinAltKeys = currentSettings?.swapWinAltKeys ?: false
-        ) ?: return false
+        )
+        if (hostKey == null) {
+            val character = event.unicodeChar
+            if (event.isCtrlPressed || event.isMetaPressed ||
+                character and KeyCharacterMap.COMBINING_ACCENT != 0 ||
+                !Character.isValidCodePoint(character) || Character.isISOControl(character)) return false
+            if (isDown) sendUtf8Text(String(Character.toChars(character)))
+            return true
+        }
 
-        val modifiers = com.moonlight.material.stream.input.KeycodeMappings.extractModifiers(event, hostKey.extended)
-        val keyAction = if (isDown) com.moonlight.material.stream.input.KeycodeMappings.KEY_ACTION_DOWN else com.moonlight.material.stream.input.KeycodeMappings.KEY_ACTION_UP
+        val modifiers = KeycodeMappings.extractModifiers(event, hostKey.extended)
+        val keyAction = if (isDown) KeycodeMappings.KEY_ACTION_DOWN else KeycodeMappings.KEY_ACTION_UP
         return try {
             MoonBridge.sendKeyboardInput(hostKey.wireCode, keyAction, modifiers, hostKey.flags)
             true
