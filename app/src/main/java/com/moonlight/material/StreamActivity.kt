@@ -103,11 +103,9 @@ class StreamActivity : ComponentActivity() {
         return super.dispatchGenericMotionEvent(event)
     }
 
-    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
-        if (::sessionController.isInitialized && sessionController.touchMouseHandler.handleGenericMotion(event)) {
-            return true
-        }
-        return super.onGenericMotionEvent(event)
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (::sessionController.isInitialized) sessionController.updateAppFocus(hasFocus)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
