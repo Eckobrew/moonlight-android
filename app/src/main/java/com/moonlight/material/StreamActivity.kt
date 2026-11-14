@@ -2,6 +2,8 @@ package com.moonlight.material
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
+import android.os.Build
+import android.net.wifi.WifiManager
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -24,6 +26,7 @@ import kotlinx.serialization.json.Json
 class StreamActivity : ComponentActivity() {
 
     private lateinit var sessionController: StreamSessionController
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -152,6 +155,29 @@ class StreamActivity : ComponentActivity() {
             }
         }
         return super.onKeyUp(keyCode, event)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onStart() {
+        super.onStart()
+        if (!::sessionController.isInitialized) return
+        val wifi = applicationContext.getSystemService(WifiManager::class.java) ?: return
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        try {
+            wifiLock = wifi.createWifiLock(mode, "Moonlight:Stream").apply { acquire() }
+        } catch (e: SecurityException) {
+            com.moonlight.material.core.utils.AppLogger.warn("Could not acquire Wi-Fi lock: ${e.message}", "SESSION")
+        }
+    }
+
+    override fun onStop() {
+        wifiLock?.let { if (it.isHeld) it.release() }
+        wifiLock = null
+        super.onStop()
     }
 
     override fun onDestroy() {
