@@ -3,9 +3,12 @@ package com.moonlight.material.stream.input
 import android.view.InputDevice
 import android.view.MotionEvent
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 interface MouseEventListener {
     fun onNativeTouch(eventType: Byte, pointerId: Int, x: Float, y: Float, pressure: Float, major: Float, minor: Float): Int = -5501
+    fun onNativePen(type: Byte, tool: Byte, buttons: Byte, x: Float, y: Float, pressure: Float,
+                    major: Float, minor: Float, tilt: Byte): Int = -5501
     fun onMouseMoveRelative(deltaX: Short, deltaY: Short)
     fun onMouseMoveAbsolute(x: Short, y: Short, screenW: Short, screenH: Short)
     fun onMouseButton(button: Byte, isDown: Boolean)
@@ -30,6 +33,7 @@ class TouchMouseHandler(
 ) {
     private var nativeTouchSupported = true
     private var nativeTouchActive = false
+    private var nativePenActive = false
     private val relativeMotion = RelativeMouseMotion()
     private var lastX = 0f
     private var lastY = 0f
@@ -72,6 +76,8 @@ class TouchMouseHandler(
 
     fun reset() {
         releasePhysicalMouse()
+        if (nativePenActive) listener.onNativePen(7, 0, 0, 0f, 0f, 0f, 0f, 0f, -1)
+        nativePenActive = false
         if (nativeTouchActive) listener.onNativeTouch(7, 0, 0f, 0f, 0f, 0f, 0f)
         nativeTouchActive = false
         nativeTouchSupported = true
@@ -80,7 +86,58 @@ class TouchMouseHandler(
         lastY = 0f
     }
 
+    private fun handlePenEvent(event: MotionEvent, width: Int, height: Int): Boolean {
+        if (isDesktopMouseMode || width <= 0 || height <= 0) return false
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL && nativePenActive) {
+            nativePenActive = false
+            listener.onNativePen(7, 0, 0, 0f, 0f, 0f, 0f, 0f, -1)
+            return true
+        }
+        val index = if (event.actionMasked == MotionEvent.ACTION_MOVE) {
+            (0 until event.pointerCount).firstOrNull {
+                event.getToolType(it) == MotionEvent.TOOL_TYPE_STYLUS ||
+                    event.getToolType(it) == MotionEvent.TOOL_TYPE_ERASER
+            } ?: return false
+        } else event.actionIndex
+        if (index !in 0 until event.pointerCount) return false
+        val tool: Byte = when (event.getToolType(index)) {
+            MotionEvent.TOOL_TYPE_STYLUS -> 1
+            MotionEvent.TOOL_TYPE_ERASER -> 2
+            else -> return false
+        }
+        val type: Byte = when (event.actionMasked) {
+            MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> 0
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> 1
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP ->
+                if (android.os.Build.VERSION.SDK_INT >= 33 && event.flags and MotionEvent.FLAG_CANCELED != 0) 4 else 2
+            MotionEvent.ACTION_MOVE -> 3
+            MotionEvent.ACTION_BUTTON_PRESS, MotionEvent.ACTION_BUTTON_RELEASE -> 5
+            MotionEvent.ACTION_HOVER_EXIT -> 6
+            else -> return false
+        }
+        val buttons = (if (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY != 0) 1 else 0) or
+            (if (event.buttonState and MotionEvent.BUTTON_STYLUS_SECONDARY != 0) 2 else 0)
+        val tilt = if (event.device?.getMotionRange(MotionEvent.AXIS_TILT, event.source) != null) {
+            Math.toDegrees(event.getAxisValue(MotionEvent.AXIS_TILT, index).toDouble()).roundToInt().coerceIn(0, 90).toByte()
+        } else (-1).toByte()
+        val pressure = if (type == 0.toByte()) {
+            val range = event.device?.getMotionRange(MotionEvent.AXIS_DISTANCE, event.source)
+            if (range != null && range.range > 0f) {
+                (event.getAxisValue(MotionEvent.AXIS_DISTANCE, index) - range.min) / range.range
+            } else 0f
+        } else event.getPressure(index)
+        val result = listener.onNativePen(
+            type, tool, buttons.toByte(), (event.getX(index) / width).coerceIn(0f, 1f),
+            (event.getY(index) / height).coerceIn(0f, 1f), pressure.coerceIn(0f, 1f),
+            event.getTouchMajor(index) / maxOf(width, height), event.getTouchMinor(index) / maxOf(width, height), tilt
+        )
+        if (result == -5501) return false
+        if (result == 0) nativePenActive = when (type.toInt()) { 0, 1, 3, 5 -> true; else -> false }
+        return true
+    }
+
     fun handleTouchEvent(event: MotionEvent, viewWidth: Int, viewHeight: Int): Boolean {
+        if (handlePenEvent(event, viewWidth, viewHeight)) return true
         if (!isDesktopMouseMode && nativeTouchSupported &&
             event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN) && viewWidth > 0 && viewHeight > 0) {
             val type: Byte = when (event.actionMasked) {
@@ -222,6 +279,7 @@ class TouchMouseHandler(
     }
 
     fun handleGenericMotion(event: MotionEvent, viewWidth: Int, viewHeight: Int): Boolean {
+        if (handlePenEvent(event, viewWidth, viewHeight)) return true
         val relative = event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
         if (!relative && !event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) {

@@ -1005,6 +1005,14 @@ class StreamSessionController(
 
     // --- MouseEventListener ---
 
+    override fun onNativePen(
+        type: Byte, tool: Byte, buttons: Byte, x: Float, y: Float, pressure: Float,
+        major: Float, minor: Float, tilt: Byte
+    ): Int {
+        if (!_isStreaming.value || _currentStageName.value != "Connected") return -5501
+        return MoonBridge.sendPenEvent(type, tool, buttons, x, y, pressure, major, minor, (-1).toShort(), tilt)
+    }
+
     override fun onNativeTouch(eventType: Byte, pointerId: Int, x: Float, y: Float, pressure: Float, major: Float, minor: Float): Int {
         if (!_isStreaming.value || _currentStageName.value != "Connected") return 0
         return try {
