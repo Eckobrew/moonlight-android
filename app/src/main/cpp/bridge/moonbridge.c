@@ -660,9 +660,9 @@ Java_com_moonlight_material_bridge_MoonBridge_sendMouseMoveAsMousePosition(JNIEn
     LiSendMouseMoveAsMousePositionEvent(deltaX, deltaY, referenceWidth, referenceHeight);
 }
 
-JNIEXPORT void JNICALL
-Java_com_moonlight_material_bridge_MoonBridge_sendMouseButton(JNIEnv *env, jclass clazz, jbyte buttonEvent, jbyte mouseButton) {
-    LiSendMouseButtonEvent(buttonEvent, mouseButton);
+JNIEXPORT jint JNICALL
+Java_com_moonlight_material_bridge_MoonBridge_sendMouseButton(JNIEnv *env, jclass clazz, jboolean isDown, jbyte mouseButton) {
+    return LiSendMouseButtonEvent(isDown ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, mouseButton);
 }
 
 JNIEXPORT void JNICALL

@@ -892,8 +892,8 @@ class StreamSessionController(
     override fun onMouseButton(button: Byte, isDown: Boolean) {
         if (!_isStreaming.value) return
         try {
-            val eventType: Byte = if (isDown) 0x01 else 0x02
-            MoonBridge.sendMouseButton(eventType, button)
+            val result = MoonBridge.sendMouseButton(isDown, button)
+            if (result != 0) AppLogger.warn("Could not queue mouse button $button (down=$isDown): $result", TAG)
         } catch (_: Throwable) {}
     }
 

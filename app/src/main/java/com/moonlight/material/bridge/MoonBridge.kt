@@ -328,7 +328,7 @@ object MoonBridge {
     external fun sendMouseMoveAsMousePosition(deltaX: Short, deltaY: Short, referenceWidth: Short, referenceHeight: Short)
 
     @JvmStatic
-    external fun sendMouseButton(buttonEvent: Byte, mouseButton: Byte)
+    external fun sendMouseButton(isDown: Boolean, mouseButton: Byte): Int
 
     @JvmStatic
     external fun sendMouseHighResScroll(scrollAmount: Short)
