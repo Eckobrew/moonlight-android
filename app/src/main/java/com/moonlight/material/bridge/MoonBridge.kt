@@ -55,6 +55,42 @@ object MoonBridge {
     const val DR_OK = 0
     const val DR_NEED_IDR = -1
 
+    // Video/Audio capabilities
+    const val CAPABILITY_DIRECT_SUBMIT = 1
+    const val CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC = 2
+    const val CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC = 4
+    const val CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION = 0x10
+    const val CAPABILITY_REFERENCE_FRAME_INVALIDATION_AV1 = 0x40
+    fun CAPABILITY_SLICES_PER_FRAME(slices: Byte): Int = slices.toInt() shl 24
+
+    // Color spaces
+    const val COLORSPACE_REC_601 = 0
+    const val COLORSPACE_REC_709 = 1
+    const val COLORSPACE_REC_2020 = 2
+
+    // Color ranges
+    const val COLOR_RANGE_LIMITED = 0
+    const val COLOR_RANGE_FULL = 1
+
+    // Controller capabilities
+    const val LI_CCAP_ANALOG_TRIGGERS: Short = 0x01
+    const val LI_CCAP_RUMBLE: Short = 0x02
+    const val LI_CCAP_TRIGGER_RUMBLE: Short = 0x04
+    const val LI_CCAP_TOUCHPAD: Short = 0x08
+    const val LI_CCAP_ACCEL: Short = 0x10
+    const val LI_CCAP_GYRO: Short = 0x20
+    const val LI_CCAP_BATTERY_STATE: Short = 0x40
+    const val LI_CCAP_RGB_LED: Short = 0x80
+
+    // Battery states
+    const val LI_BATTERY_STATE_UNKNOWN: Byte = 0
+    const val LI_BATTERY_STATE_NOT_PRESENT: Byte = 1
+    const val LI_BATTERY_STATE_DISCHARGING: Byte = 2
+    const val LI_BATTERY_STATE_CHARGING: Byte = 3
+    const val LI_BATTERY_STATE_NOT_CHARGING: Byte = 4
+    const val LI_BATTERY_STATE_FULL: Byte = 5
+    const val LI_BATTERY_PERCENTAGE_UNKNOWN: Byte = -1
+
     // Buffer types
     const val BUFFER_TYPE_PICDATA = 0x00
     const val BUFFER_TYPE_SPS = 0x01

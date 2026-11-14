@@ -56,6 +56,7 @@ fun StreamingScreen(
     val metrics by session.metrics.collectAsState()
     val showHUD by session.showPerformanceOverlay.collectAsState()
     val showControlsSheet by session.showSessionControls.collectAsState()
+    val negotiatedSize by session.negotiatedVideoSize.collectAsState()
 
     var touchAreaSize by remember { mutableStateOf(IntSize.Zero) }
     var showKeyboardOverlay by remember { mutableStateOf(false) }
@@ -118,10 +119,16 @@ fun StreamingScreen(
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize().background(Color.Black)
     ) {
-        val videoAspect = settings.width.toFloat() / settings.height.coerceAtLeast(1)
-        val videoSize = if (maxWidth / maxHeight > videoAspect)
+        val streamW = negotiatedSize?.first ?: settings.width
+        val streamH = negotiatedSize?.second ?: settings.height
+        val videoAspect = streamW.toFloat() / streamH.coerceAtLeast(1)
+        val videoSize = if (settings.features.stretchToFit) {
+            Modifier.fillMaxSize()
+        } else if (maxWidth / maxHeight > videoAspect) {
             Modifier.fillMaxHeight().aspectRatio(videoAspect)
-        else Modifier.fillMaxWidth().aspectRatio(videoAspect)
+        } else {
+            Modifier.fillMaxWidth().aspectRatio(videoAspect)
+        }
         // Video SurfaceView
         val inputCaptured by session.inputCaptured.collectAsState()
         val captureMouse = inputCaptured && physicalMouseConnected && stageName == "Connected" && !showKeyboardOverlay && !showControlsSheet
@@ -145,12 +152,28 @@ fun StreamingScreen(
                     }
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val targetRate = if (!settings.enableFramePacing) {
+                                session.displayRefreshRate().coerceAtLeast(settings.fps.toFloat())
+                            } else {
+                                settings.fps.toFloat()
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                 holder.surface.setFrameRate(
-                                    settings.fps.toFloat(), android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
+                                    targetRate,
+                                    android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                                    android.view.Surface.CHANGE_FRAME_RATE_ALWAYS
+                                )
+                            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                holder.surface.setFrameRate(
+                                    targetRate,
+                                    android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
                                 )
                             }
-                            session.startSession(host, app, settings, holder.surface)
+                            if (session.isStreaming.value) {
+                                session.updateSurface(holder.surface)
+                            } else {
+                                session.startSession(host, app, settings, holder.surface)
+                            }
                         }
 
                         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}

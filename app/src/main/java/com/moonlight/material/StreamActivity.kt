@@ -39,9 +39,7 @@ class StreamActivity : ComponentActivity() {
 
         // Always lock streaming screen to landscape (supporting both landscape rotations)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-
-        // Keep screen on during streaming
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        volumeControlStream = android.media.AudioManager.STREAM_MUSIC
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
@@ -63,6 +61,26 @@ class StreamActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealSize(displaySize)
         val settings = requestedSettings.resolveNativeResolution(displaySize.x, displaySize.y)
+        if (settings.keepScreenActive) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val stretchOrFullScreen = settings.features.stretchToFit ||
+                (displaySize.x == settings.width && displaySize.y == settings.height)
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = if (stretchOrFullScreen) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    } else {
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    }
+                } else {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER
+                }
+            }
+        }
         com.moonlight.material.core.utils.AppLogger.info(
             "Requested ${if (requestedSettings.isNativeResolution) "Native" else "preset"} stream mode: ${settings.width}x${settings.height}x${settings.fps}", "SESSION")
 
@@ -73,24 +91,47 @@ class StreamActivity : ComponentActivity() {
         }
 
         val display = windowManager.defaultDisplay
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            val currentMode = display.mode
-            val matchingMode = display.supportedModes.filter {
-                it.physicalWidth == currentMode.physicalWidth && it.physicalHeight == currentMode.physicalHeight
-            }.filter {
-                val multiple = kotlin.math.round(it.refreshRate / settings.fps).toInt().coerceAtLeast(1)
-                abs(it.refreshRate - settings.fps * multiple) < 1f
-            }.minByOrNull { it.refreshRate }
-            if (matchingMode != null) {
-                window.attributes = window.attributes.apply { preferredDisplayModeId = matchingMode.modeId }
-            }
+        val currentMode = display.mode
+        val matchingModes = display.supportedModes.filter {
+            it.physicalWidth == currentMode.physicalWidth && it.physicalHeight == currentMode.physicalHeight
+        }.filter {
+            val roundedRate = kotlin.math.round(it.refreshRate).toInt().coerceAtLeast(1)
+            roundedRate >= settings.fps && (roundedRate % settings.fps <= 3 || abs(it.refreshRate - settings.fps) <= 3f)
+        }
+        val bestMode = if (!settings.enableFramePacing) {
+            matchingModes.maxByOrNull { it.refreshRate }
+        } else {
+            matchingModes.minByOrNull { it.refreshRate }
+        } ?: display.supportedModes
+            .filter { it.physicalWidth == currentMode.physicalWidth && it.physicalHeight == currentMode.physicalHeight }
+            .maxByOrNull { it.refreshRate }
+
+        if (bestMode != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            window.attributes = window.attributes.apply { preferredDisplayModeId = bestMode.modeId }
         }
         if (settings.width > 0 && settings.height > 0 &&
             settings.width.toDouble() / settings.height in (1.0 / 2.39)..2.39) {
             streamAspectRatio = Rational(settings.width, settings.height)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            setPictureInPictureParams(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(streamAspectRatio)
+                    .setAutoEnterEnabled(true)
+                    .setSeamlessResizeEnabled(true)
+                    .build()
+            )
+        }
         sessionController.applicationContext = applicationContext
-        sessionController.displayRefreshRate = { display.refreshRate }
+        sessionController.displayRefreshRate = { bestMode?.refreshRate ?: display.refreshRate }
+        sessionController.displaySupportsHdr10 = {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                display.hdrCapabilities?.supportedHdrTypes?.contains(android.view.Display.HdrCapabilities.HDR_TYPE_HDR10) == true
+            } else {
+                false
+            }
+        }
         sessionController.isShortcutMode = intent.getBooleanExtra("EXTRA_SHORTCUT_MODE", false)
 
         setContent {
@@ -225,7 +266,7 @@ class StreamActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) enterStreamPictureInPicture()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) enterStreamPictureInPicture()
     }
 
     @Suppress("DEPRECATION")

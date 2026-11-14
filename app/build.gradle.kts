@@ -100,6 +100,7 @@ dependencies {
 
     implementation(libs.bouncycastle.prov)
     implementation(libs.bouncycastle.pkix)
+    implementation(libs.jcodec)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

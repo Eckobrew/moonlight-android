@@ -51,8 +51,11 @@ fun PerformanceHUD(
             text = "${String.format("%.1f", metrics.currentFps)} rendered FPS · ${metrics.resolution} · ${metrics.currentCodec}",
             style = textStyle
         )
+        val hostLatText = if (metrics.hostProcessingLatencyMs > 0.0) {
+            "Host enc: ${String.format("%.1f", metrics.hostProcessingLatencyMs)} ms · "
+        } else ""
         Text(
-            text = "Decode + queue: ${String.format("%.2f", metrics.decodeTimeMs)} ms · RTT: ${String.format("%.1f", metrics.roundTripTimeMs)} ms (±${String.format("%.1f", metrics.roundTripTimeVarianceMs)})",
+            text = "${hostLatText}Decode + queue: ${String.format("%.2f", metrics.decodeTimeMs)} ms · RTT: ${String.format("%.1f", metrics.roundTripTimeMs)} ms (±${String.format("%.1f", metrics.roundTripTimeVarianceMs)})",
             style = textStyle
         )
         if (metrics.networkDroppedFrames > 0 || metrics.decoderDroppedFrames > 0) {

@@ -3,11 +3,13 @@ package com.moonlight.material.stream.video
 /** Thread-safe, monotonic, rolling measurements across input, decoder and render callbacks. */
 class VideoPerformanceTracker(private val nowNs: () -> Long = System::nanoTime) {
     data class Snapshot(val receivedFps: Double, val decodedFps: Double, val renderedFps: Double,
-        val decodeTimeMs: Double, val networkDroppedFrames: Int, val decoderDroppedFrames: Int)
+        val decodeTimeMs: Double, val networkDroppedFrames: Int, val decoderDroppedFrames: Int,
+        val hostProcessingLatencyMs: Double = 0.0)
     private val received = ArrayDeque<Long>()
     private val decoded = ArrayDeque<Long>()
     private val rendered = ArrayDeque<Long>()
     private val decodeTimes = ArrayDeque<Pair<Long, Double>>()
+    private val hostLatencies = ArrayDeque<Pair<Long, Double>>()
     private val queued = LinkedHashMap<Long, Long>()
     private var startedNs = nowNs()
     private var lastFrame: Int? = null
@@ -16,14 +18,18 @@ class VideoPerformanceTracker(private val nowNs: () -> Long = System::nanoTime) 
     private val windowNs = 1_000_000_000L
 
     @Synchronized fun reset() {
-        received.clear(); decoded.clear(); rendered.clear(); decodeTimes.clear(); queued.clear()
+        received.clear(); decoded.clear(); rendered.clear(); decodeTimes.clear(); hostLatencies.clear(); queued.clear()
         startedNs = nowNs(); lastFrame = null; networkDrops = 0; decoderDrops = 0
     }
-    @Synchronized fun receivedFrame(number: Int) {
+    @Synchronized fun receivedFrame(number: Int, hostProcessingLatencyTenthsMs: Short = 0) {
         if (number == lastFrame) return
         lastFrame?.let { if (number > it + 1) networkDrops += number - it - 1 }
         lastFrame = number
-        received.addLast(nowNs())
+        val t = nowNs()
+        received.addLast(t)
+        if (hostProcessingLatencyTenthsMs > 0) {
+            hostLatencies.addLast(t to (hostProcessingLatencyTenthsMs.toInt() and 0xFFFF) / 10.0)
+        }
     }
     @Synchronized fun queuedFrame(presentationTimeUs: Long) {
         queued[presentationTimeUs] = nowNs()
@@ -50,8 +56,10 @@ class VideoPerformanceTracker(private val nowNs: () -> Long = System::nanoTime) 
             return events.count { it <= time } * 1_000_000_000.0 / elapsed
         }
         while (decodeTimes.isNotEmpty() && decodeTimes.first().first <= cutoff) decodeTimes.removeFirst()
+        while (hostLatencies.isNotEmpty() && hostLatencies.first().first <= cutoff) hostLatencies.removeFirst()
         return Snapshot(fps(received), fps(decoded), fps(rendered),
             if (decodeTimes.isEmpty()) 0.0 else decodeTimes.sumOf { it.second } / decodeTimes.size,
-            networkDrops, decoderDrops)
+            networkDrops, decoderDrops,
+            if (hostLatencies.isEmpty()) 0.0 else hostLatencies.sumOf { it.second } / hostLatencies.size)
     }
 }

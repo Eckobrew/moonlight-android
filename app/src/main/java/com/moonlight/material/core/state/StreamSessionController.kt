@@ -119,6 +119,7 @@ class StreamSessionController(
     private val clipboardSync = ClipboardSyncManager(httpClient)
     private var hasAppFocus = true
     var displayRefreshRate: () -> Float = { 60f }
+    var displaySupportsHdr10: () -> Boolean = { true }
     private inner class Controller(val slot: Int, var device: InputDevice) {
         val handler = GamepadHandler(this@StreamSessionController, controllerNumber = slot.toShort())
         var state: ControllerState? = null
@@ -284,6 +285,8 @@ class StreamSessionController(
     private var metricsJob: Job? = null
 
     // Real negotiated stream parameters reported by drSetup callback
+    private val _negotiatedVideoSize = MutableStateFlow<Pair<Int, Int>?>(null)
+    val negotiatedVideoSize: StateFlow<Pair<Int, Int>?> = _negotiatedVideoSize.asStateFlow()
     private var negotiatedWidth: Int? = null
     private var negotiatedHeight: Int? = null
     private var negotiatedFps: Int? = null
@@ -425,6 +428,7 @@ class StreamSessionController(
                 _currentStageName.value = "Requesting session from host..."
                 negotiatedWidth = null
                 negotiatedHeight = null
+                _negotiatedVideoSize.value = null
                 negotiatedFps = null
                 negotiatedCodec = null
                 onSessionStarted?.invoke()
@@ -484,6 +488,28 @@ class StreamSessionController(
                 touchMouseHandler.reverseScroll = settings.features.reverseScroll
                 touchMouseHandler.reset()
 
+                // Probe hardware codec capabilities and HDR support before launching/starting connection
+                val requestedMask = settings.codec.limelightMask(settings.enableHdr, settings.features.yuv444)
+                val codecProbe = applicationContext?.let { ctx ->
+                    com.moonlight.material.stream.video.MediaCodecHelper.probeCapabilities(
+                        context = ctx,
+                        requestedCodecMask = requestedMask,
+                        width = settings.width,
+                        height = settings.height,
+                        fps = settings.fps,
+                        enableHdr = settings.enableHdr,
+                        enableYuv444 = settings.features.yuv444,
+                        displaySupportsHdr10 = displaySupportsHdr10()
+                    )
+                }
+                val probedFormats = codecProbe?.supportedVideoFormats ?: requestedMask
+                val probedCapabilities = codecProbe?.videoCapabilities ?: MoonBridge.CAPABILITY_DIRECT_SUBMIT
+                val streamColorSpace = if ((probedFormats and MoonBridge.VIDEO_FORMAT_MASK_10BIT) != 0) {
+                    MoonBridge.COLORSPACE_REC_2020
+                } else {
+                    MoonBridge.COLORSPACE_REC_709
+                }
+
                 // Create hardware video decoder and audio playback engine
                 videoDecoder = MediaCodecDecoder(
                     surface = surface,
@@ -491,6 +517,12 @@ class StreamSessionController(
                     streamHeight = settings.height,
                     streamFps = settings.fps,
                     enablePacing = settings.enableFramePacing,
+                    enableVsync = settings.enableVsync,
+                    fullRangeColor = settings.fullRangeColor,
+                    colorSpace = streamColorSpace,
+                    refFrameInvalidationAvc = (probedCapabilities and MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC) != 0,
+                    refFrameInvalidationHevc = (probedCapabilities and MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC) != 0,
+                    refFrameInvalidationAv1 = (probedCapabilities and MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_AV1) != 0,
                     decoderPreference = settings.features.decoder,
                     listener = this@StreamSessionController
                 )
@@ -515,7 +547,10 @@ class StreamSessionController(
                     settings = settings,
                     rikey = rikey,
                     rikeyId = rikeyId,
-                    generation = generation
+                    generation = generation,
+                    supportedVideoFormats = probedFormats,
+                    videoCapabilities = probedCapabilities,
+                    colorSpace = streamColorSpace
                 )
 
             } catch (e: Exception) {
@@ -560,7 +595,10 @@ class StreamSessionController(
         settings: StreamSettings,
         rikey: ByteArray,
         rikeyId: Int,
-        generation: Long
+        generation: Long,
+        supportedVideoFormats: Int = settings.codec.limelightMask(settings.enableHdr, settings.features.yuv444),
+        videoCapabilities: Int = MoonBridge.CAPABILITY_DIRECT_SUBMIT,
+        colorSpace: Int = MoonBridge.COLORSPACE_REC_709
     ) {
         val chosenBitrateKbps = settings.streamBitrateKbps(isRemote = host.isRemoteConnection || isMeteredNetwork())
         _runtimeBitrateKbps.value = chosenBitrateKbps
@@ -569,11 +607,7 @@ class StreamSessionController(
         val riAesIv = ByteArray(16)
         ByteBuffer.wrap(riAesIv).order(ByteOrder.BIG_ENDIAN).putInt(rikeyId)
 
-        val videoFormatMask = settings.codec.limelightMask(settings.enableHdr, settings.features.yuv444)
-        val videoCapabilities = 0x1 // CAPABILITY_DIRECT_SUBMIT
-
-        val colorSpace = 2 // COLORSPACE_REC_709
-        val colorRange = if (settings.fullRangeColor) 1 else 0
+        val colorRange = if (settings.fullRangeColor) MoonBridge.COLOR_RANGE_FULL else MoonBridge.COLOR_RANGE_LIMITED
 
         val refreshRate = displayRefreshRate().takeIf { it.isFinite() && it > 0f } ?: 60f
         streamJob = scope.launch(Dispatchers.IO) {
@@ -591,7 +625,7 @@ class StreamSessionController(
                     packetSize = settings.packetSize,
                     streamingRemotely = if (host.isRemoteConnection) 1 else 2, // REMOTE or AUTO
                     audioConfiguration = settings.audioMode.limelightValue,
-                    supportedVideoFormats = videoFormatMask,
+                    supportedVideoFormats = supportedVideoFormats,
                     clientRefreshRateX100 = (refreshRate * 100).roundToInt(),
                     riAesKey = riAesKey,
                     riAesIv = riAesIv,
@@ -658,6 +692,7 @@ class StreamSessionController(
                         decoderDroppedFrames = video?.decoderDroppedFrames ?: 0,
                         targetFps = targetFps,
                         decodeTimeMs = video?.decodeTimeMs ?: 0.0,
+                        hostProcessingLatencyMs = video?.hostProcessingLatencyMs ?: 0.0,
                         roundTripTimeMs = rttMs,
                         roundTripTimeVarianceMs = rttVarMs,
                         bitrateMbps = _runtimeBitrateKbps.value / 1000.0,
@@ -1007,7 +1042,9 @@ class StreamSessionController(
             if (rgb.isEmpty()) return@dispatchNativeEvent
             try {
                 val session = controller.lights ?: lights.openSession().also { controller.lights = it }
-                val state = LightState(android.graphics.Color.rgb(r.toInt() and 255, g.toInt() and 255, b.toInt() and 255))
+                val state = LightState.Builder()
+                    .setColor(android.graphics.Color.rgb(r.toInt() and 255, g.toInt() and 255, b.toInt() and 255))
+                    .build()
                 val request = LightsRequest.Builder()
                 rgb.forEach { request.addLight(it, state) }
                 session.requestLights(request.build())
@@ -1023,6 +1060,7 @@ class StreamSessionController(
         override fun onSetup(videoFormat: Int, width: Int, height: Int, redrawRate: Int): Int {
             negotiatedWidth = width
             negotiatedHeight = height
+            _negotiatedVideoSize.value = width to height
             negotiatedFps = redrawRate
             val isAv1 = (videoFormat and 0xF000) != 0
             val isHevc = (videoFormat and 0x0F00) != 0
@@ -1100,6 +1138,11 @@ class StreamSessionController(
     override fun onFormatChanged(width: Int, height: Int) {
         negotiatedWidth = width
         negotiatedHeight = height
+        _negotiatedVideoSize.value = width to height
+    }
+
+    fun updateSurface(surface: Surface) {
+        videoDecoder?.setSurface(surface)
     }
 
     override fun onDecoderError(error: String) {

@@ -259,6 +259,13 @@ private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
             checked = settings.features.yuv444,
             onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(yuv444 = it))) }
         )
+
+        SettingToggle(
+            title = "Stretch Video to Fill Screen",
+            subtitle = "Ignore aspect ratio and fill the entire display including notch areas",
+            checked = settings.features.stretchToFit,
+            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(stretchToFit = it))) }
+        )
     }
 }
 

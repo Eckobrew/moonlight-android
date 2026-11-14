@@ -10,6 +10,7 @@ data class PerformanceMetrics(
     val decoderDroppedFrames: Int = 0,
     val targetFps: Int = 60,
     val decodeTimeMs: Double = 0.0,
+    val hostProcessingLatencyMs: Double = 0.0,
     val roundTripTimeMs: Double = 0.0,
     val roundTripTimeVarianceMs: Double = 0.0,
     val bitrateMbps: Double = 0.0,
