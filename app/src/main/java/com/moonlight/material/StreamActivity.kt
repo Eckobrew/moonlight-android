@@ -22,6 +22,7 @@ import com.moonlight.material.core.security.CertificateManager
 import com.moonlight.material.ui.stream.StreamingScreen
 import com.moonlight.material.ui.theme.MoonlightTheme
 import kotlinx.serialization.json.Json
+import kotlin.math.abs
 
 class StreamActivity : ComponentActivity() {
 
@@ -66,6 +67,20 @@ class StreamActivity : ComponentActivity() {
             com.moonlight.material.networking.NetworkReachability(this).getCurrentState().isMetered
         }
 
+        val display = windowManager.defaultDisplay
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            val currentMode = display.mode
+            val matchingMode = display.supportedModes.filter {
+                it.physicalWidth == currentMode.physicalWidth && it.physicalHeight == currentMode.physicalHeight
+            }.filter {
+                val multiple = kotlin.math.round(it.refreshRate / settings.fps).toInt().coerceAtLeast(1)
+                abs(it.refreshRate - settings.fps * multiple) < 1f
+            }.minByOrNull { it.refreshRate }
+            if (matchingMode != null) {
+                window.attributes = window.attributes.apply { preferredDisplayModeId = matchingMode.modeId }
+            }
+        }
+        sessionController.displayRefreshRate = { display.refreshRate }
         sessionController.isShortcutMode = intent.getBooleanExtra("EXTRA_SHORTCUT_MODE", false)
 
         setContent {

@@ -3,6 +3,7 @@ package com.moonlight.material.ui.stream
 import android.hardware.input.InputManager
 import android.view.InputDevice
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -145,6 +146,11 @@ fun StreamingScreen(
                     }
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                holder.surface.setFrameRate(
+                                    settings.fps.toFloat(), android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
+                                )
+                            }
                             session.startSession(host, app, settings, holder.surface)
                         }
 

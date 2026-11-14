@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.roundToInt
 
 class StreamSessionController(
     private val httpClient: SunshineHTTPClient,
@@ -100,6 +101,7 @@ class StreamSessionController(
     private var videoDecoder: MediaCodecDecoder? = null
     private var audioEngine: AudioPlaybackEngine? = null
 
+    var displayRefreshRate: () -> Float = { 60f }
     val gamepadHandler = GamepadHandler(this)
     private var physicalController: InputDevice? = null
     private var controllerAdvertisedAtLaunch = false
@@ -494,6 +496,7 @@ class StreamSessionController(
         val colorSpace = 2 // COLORSPACE_REC_709
         val colorRange = if (settings.fullRangeColor) 1 else 0
 
+        val refreshRate = displayRefreshRate().takeIf { it.isFinite() && it > 0f } ?: 60f
         streamJob = scope.launch(Dispatchers.IO) {
             val result = try {
                 MoonBridge.startConnection(
@@ -510,7 +513,7 @@ class StreamSessionController(
                     streamingRemotely = if (host.isRemoteConnection) 1 else 2, // REMOTE or AUTO
                     audioConfiguration = settings.audioMode.limelightValue,
                     supportedVideoFormats = videoFormatMask,
-                    clientRefreshRateX100 = 6000,
+                    clientRefreshRateX100 = (refreshRate * 100).roundToInt(),
                     riAesKey = riAesKey,
                     riAesIv = riAesIv,
                     videoCapabilities = videoCapabilities,
