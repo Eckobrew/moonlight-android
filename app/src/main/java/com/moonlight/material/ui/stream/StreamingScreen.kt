@@ -72,17 +72,15 @@ fun StreamingScreen(
     var controllerEnabled by rememberSaveable { mutableStateOf(settings.features.touchOverlayEnabled) }
     val context = LocalContext.current
     var physicalMouseConnected by remember { mutableStateOf(false) }
-    var physicalControllerId by remember { mutableStateOf<Int?>(null) }
-    val physicalControllerConnected = physicalControllerId != null
+    var physicalControllerConnected by remember { mutableStateOf(false) }
     DisposableEffect(context, session) {
         val manager = context.getSystemService(Context.INPUT_SERVICE) as InputManager
         fun refreshDevices() {
             val inputDevices = manager.inputDeviceIds.map { manager.getInputDevice(it) }.filterNotNull()
             physicalMouseConnected = inputDevices.any { !it.isVirtual && it.supportsSource(InputDevice.SOURCE_MOUSE) }
             val devices = inputDevices.filter(GamepadHandler::isGamepad)
-            val device = devices.firstOrNull { it.id == physicalControllerId } ?: devices.firstOrNull()
-            physicalControllerId = device?.id
-            session.updatePhysicalController(device)
+            physicalControllerConnected = devices.isNotEmpty()
+            session.updatePhysicalControllers(devices)
         }
         val listener = object : InputManager.InputDeviceListener {
             override fun onInputDeviceAdded(deviceId: Int) = refreshDevices()
@@ -93,7 +91,7 @@ fun StreamingScreen(
         refreshDevices()
         onDispose {
             manager.unregisterInputDeviceListener(listener)
-            session.updatePhysicalController(null)
+            session.updatePhysicalControllers(emptyList())
         }
     }
     // Read overlay state during composition so this effect updates when either overlay changes.

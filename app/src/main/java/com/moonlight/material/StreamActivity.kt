@@ -120,8 +120,7 @@ class StreamActivity : ComponentActivity() {
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (::sessionController.isInitialized && sessionController.canForwardGamepadInput &&
-            sessionController.acceptsPhysicalController(event.deviceId, event.device) &&
-            sessionController.gamepadHandler.handleGenericMotionEvent(event)) {
+            sessionController.controllerHandler(event.deviceId, event.device)?.handleGenericMotionEvent(event) == true) {
             return true
         }
         return super.dispatchGenericMotionEvent(event)
@@ -133,11 +132,12 @@ class StreamActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (::sessionController.isInitialized && sessionController.canForwardGamepadInput &&
-            sessionController.acceptsPhysicalController(event.deviceId, event.device)) {
+        if (::sessionController.isInitialized && sessionController.canForwardGamepadInput) {
+            val handler = sessionController.controllerHandler(event.deviceId, event.device)
+                ?: return super.dispatchKeyEvent(event)
             // Some pads report a key as Android Back. A physical pad must not
             // trigger the stream menu or Android's fallback from BUTTON_B to BACK.
-            if (sessionController.gamepadHandler.handleKeyEvent(event)) return true
+            if (handler.handleKeyEvent(event)) return true
             if (event.keyCode == KeyEvent.KEYCODE_BACK ||
                 KeyEvent.isGamepadButton(event.keyCode) ||
                 event.isFromSource(InputDevice.SOURCE_GAMEPAD)) {

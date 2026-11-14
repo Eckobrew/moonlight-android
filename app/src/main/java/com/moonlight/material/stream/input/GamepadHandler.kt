@@ -30,7 +30,8 @@ interface GamepadListener {
 class GamepadHandler(
     private val listener: GamepadListener,
     var swapFaceButtons: Boolean = false,
-    var gamepadMouseEnabled: Boolean = true
+    var gamepadMouseEnabled: Boolean = true,
+    private val controllerNumber: Short = 0
 ) {
     companion object {
         const val BUTTON_HOLD_SECONDS = 3
@@ -263,7 +264,7 @@ class GamepadHandler(
 
     private fun notifyState() {
         listener.onControllerStateChanged(
-            controllerNumber = 0,
+            controllerNumber = controllerNumber,
             buttonFlags = buttonFlags or hatFlags,
             leftTrigger = if (leftTriggerPressed) 255.toByte() else leftTrigger,
             rightTrigger = if (rightTriggerPressed) 255.toByte() else rightTrigger,

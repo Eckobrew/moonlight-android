@@ -109,14 +109,20 @@ class StreamSessionController(
 
     var audioContext: Context? = null
     var displayRefreshRate: () -> Float = { 60f }
-    val gamepadHandler = GamepadHandler(this)
-    private var physicalController: InputDevice? = null
-    private var controllerAdvertisedAtLaunch = false
-    private var controllerRegistered = false
-    private var controllerRemovalPending = false
+    private inner class Controller(val slot: Int, var device: InputDevice) {
+        val handler = GamepadHandler(this@StreamSessionController, controllerNumber = slot.toShort())
+        var state: ControllerState? = null
+    }
+
+    private val controllers = mutableMapOf<Int, Controller>()
+    private var advertisedControllers = 0
+    private var registeredControllers = 0
     private var lastControllerError: Int? = null
-    private var controllerInputReceived = false
-    private var lastControllerState: ControllerState? = null
+    private val controllerLimit: Int
+        get() = if (activeHost?.appVersion?.substringAfterLast('.')?.toIntOrNull()?.let { it < 0 } == true) 16 else 4
+
+    private fun controllerMask() = controllers.values.fold(0) { mask, controller -> mask or (1 shl controller.slot) }
+
     private data class ControllerState(
         val buttons: Int,
         val leftTrigger: Byte,
@@ -134,29 +140,36 @@ class StreamSessionController(
     val canForwardGamepadInput: Boolean
         get() = _isStreaming.value && _currentStageName.value == "Connected" && !localInputActive
 
-    fun updatePhysicalController(device: InputDevice?) {
-        val previous = physicalController
-        val changed = previous?.id != device?.id
-        if (changed) previous?.let { controllerVibrator(it).cancel() }
-        physicalController = device
-        if (changed) {
-            controllerInputReceived = false
-            lastControllerState = null
-            gamepadHandler.reset()
-            controllerRemovalPending = controllerRemovalPending || controllerRegistered
-            controllerRegistered = false
+    fun updatePhysicalControllers(devices: List<InputDevice>) {
+        val ids = devices.map { it.id }.toSet()
+        for (id in controllers.keys.toList()) {
+            if (id in ids) continue
+            val removed = controllers.remove(id) ?: continue
+            removed.handler.reset()
+            controllerVibrator(removed.device).cancel()
         }
-        if (_isStreaming.value && _currentStageName.value == "Connected") {
-            refreshControllerRegistration()
-        }
+        devices.forEach { controllerHandler(it.id, it, refresh = false) }
+        if (_currentStageName.value == "Connected") refreshControllerRegistration()
     }
 
-    fun acceptsPhysicalController(deviceId: Int, device: InputDevice?): Boolean {
-        if (physicalController?.id == deviceId) return true
-        if (device == null || device.isVirtual) return false
-        if (physicalController != null || !GamepadHandler.isGamepad(device)) return false
-        updatePhysicalController(device)
-        return true
+    fun controllerHandler(deviceId: Int, device: InputDevice?, refresh: Boolean = true): GamepadHandler? {
+        controllers[deviceId]?.let {
+            if (device != null) it.device = device
+            return it.handler
+        }
+        if (device == null || !GamepadHandler.isGamepad(device)) return null
+        val occupied = controllerMask()
+        val slot = (0 until controllerLimit).firstOrNull { occupied and (1 shl it) == 0 } ?: return null
+        // Send removals before reusing a slot.
+        if (registeredControllers and (1 shl slot) != 0 && !syncControllerRegistration()) return null
+        val controller = Controller(slot, device)
+        controllers[deviceId] = controller
+        currentSettings?.features?.let {
+            controller.handler.swapFaceButtons = it.swapFaceButtons
+            controller.handler.gamepadMouseEnabled = it.gamepadMouse
+        }
+        if (refresh && _currentStageName.value == "Connected") refreshControllerRegistration()
+        return controller.handler
     }
 
     private fun refreshControllerRegistration() {
@@ -171,27 +184,30 @@ class StreamSessionController(
 
     private fun syncControllerRegistration(): Boolean {
         if (controllerPermissionDenied) return true
-        if (controllerRemovalPending) {
-            val mask: Short = if (currentSettings?.features?.persistentGamepad == true) 1 else 0
-            if (!checkControllerResult("release", MoonBridge.sendMultiControllerInput(0, mask, 0, 0, 0, 0, 0, 0, 0))) {
-                return false
-            }
-            controllerRemovalPending = false
+        val wanted = controllerMask()
+        val keepSlot = if (currentSettings?.features?.persistentGamepad == true) 1 else 0
+        for (slot in 0 until controllerLimit) {
+            val bit = 1 shl slot
+            if (registeredControllers and bit == 0 || wanted and bit != 0) continue
+            val remaining = registeredControllers and bit.inv()
+            val mask = (remaining or keepSlot).toShort()
+            if (!checkControllerResult("release", MoonBridge.sendMultiControllerInput(slot.toShort(), mask, 0, 0, 0, 0, 0, 0, 0))) return false
+            registeredControllers = remaining
         }
-        val device = physicalController ?: return true
-        if (!controllerRegistered) {
+        for (controller in controllers.values) {
+            val bit = 1 shl controller.slot
+            if (registeredControllers and bit != 0) continue
+            val device = controller.device
             val type = MoonBridge.guessControllerType(device.vendorId, device.productId)
+            val capabilities = if (controllerVibrator(device).hasVibrator()) 3 else 1
+            val next = registeredControllers or bit
             val result = MoonBridge.sendControllerArrivalEvent(
-                0, 1, type, ControllerButtonFlags.STANDARD_BUTTONS,
-                (if (controllerVibrator(device).hasVibrator()) 0x03 else 0x01).toShort()
-                // LI_CCAP_ANALOG_TRIGGERS | LI_CCAP_RUMBLE when a vibrator is available
+                controller.slot.toByte(), (next or keepSlot).toShort(), type, ControllerButtonFlags.STANDARD_BUTTONS, capabilities.toShort()
             )
-            controllerRegistered = checkControllerResult("register", result)
-            if (controllerRegistered) {
-                AppLogger.info("Queued arrival for ${device.name} as controller 0 (type $type)", "GAMEPAD")
-            }
+            if (!checkControllerResult("register", result)) return false
+            registeredControllers = next
         }
-        return controllerRegistered
+        return true
     }
 
     private fun checkControllerResult(operation: String, result: Int): Boolean {
@@ -291,7 +307,7 @@ class StreamSessionController(
     fun markConnected() {
         if (!_isStreaming.value || _currentStageName.value == "Connected") return
         _currentStageName.value = "Connected"
-        controllerRemovalPending = controllerAdvertisedAtLaunch && physicalController == null
+        registeredControllers = advertisedControllers and controllerMask().inv()
         val permission = activeHost?.capabilities?.permission
         AppLogger.info("Host controller permission: ${permission?.let { !controllerPermissionDenied } ?: "not reported"} (mask=$permission)", "GAMEPAD")
         refreshControllerRegistration()
@@ -381,9 +397,9 @@ class StreamSessionController(
 
                 // Launch or Resume decision matching StreamSessionController.swift:301, 339, 359
                 preserveHostApplication = app.control == AppControl.RESUME
-                controllerAdvertisedAtLaunch = physicalController != null
-                val launchSettings = if (controllerAdvertisedAtLaunch || settings.features.persistentGamepad) {
-                    settings.copy(controllerMask = (settings.controllerMask.toInt() or 1).toShort())
+                advertisedControllers = controllerMask()
+                val launchSettings = if (advertisedControllers != 0 || settings.features.persistentGamepad) {
+                    settings.copy(controllerMask = (settings.controllerMask.toInt() or advertisedControllers or if (settings.features.persistentGamepad) 1 else 0).toShort())
                 } else {
                     settings
                 }
@@ -410,8 +426,10 @@ class StreamSessionController(
                 if (!_isStreaming.value || sessionGeneration != generation) return@launch
 
                 currentSettings = settings
-                gamepadHandler.swapFaceButtons = settings.features.swapFaceButtons
-                gamepadHandler.gamepadMouseEnabled = settings.features.gamepadMouse
+                controllers.values.forEach {
+                    it.handler.swapFaceButtons = settings.features.swapFaceButtons
+                    it.handler.gamepadMouseEnabled = settings.features.gamepadMouse
+                }
                 setTouchpadMode(settings.features.desktopMouse)
                 touchMouseHandler.mouseSensitivityX = settings.mouseSensitivityX * settings.mouseSensitivity
                 touchMouseHandler.mouseSensitivityY = settings.mouseSensitivityY * settings.mouseSensitivity
@@ -603,16 +621,16 @@ class StreamSessionController(
 
     fun stopSession(forceQuitApp: Boolean? = null) {
         touchMouseHandler.reset()
-        gamepadHandler.reset()
-        physicalController?.let { controllerVibrator(it).cancel() }
+        controllers.values.forEach {
+            it.handler.reset()
+            it.state = null
+            controllerVibrator(it.device).cancel()
+        }
         controllerRetryJob?.cancel()
         controllerRetryJob = null
-        controllerAdvertisedAtLaunch = false
-        controllerRegistered = false
-        controllerRemovalPending = false
+        advertisedControllers = 0
+        registeredControllers = 0
         lastControllerError = null
-        controllerInputReceived = false
-        lastControllerState = null
         sessionGeneration++
         val hostToQuit = activeHost
         val shouldQuit = forceQuitApp ?: shouldQuitHostAppOnStop
@@ -866,8 +884,8 @@ class StreamSessionController(
 
     override fun onRumble(controllerNumber: Short, lowFreqMotor: Short, highFreqMotor: Short) {
         dispatchNativeEvent {
-            if (controllerNumber.toInt() != 0) return@dispatchNativeEvent
-            val device = physicalController ?: return@dispatchNativeEvent
+            val device = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }?.device
+                ?: return@dispatchNativeEvent
             val vibrator = controllerVibrator(device)
             if (!vibrator.hasVibrator()) return@dispatchNativeEvent
 
@@ -883,7 +901,7 @@ class StreamSessionController(
     }
 
     override fun onRumbleTriggers(controllerNumber: Short, leftTrigger: Short, rightTrigger: Short) {
-        gamepadHandler.handleRumbleTriggers(controllerNumber, leftTrigger, rightTrigger)
+        onRumble(controllerNumber, leftTrigger, rightTrigger)
     }
 
     override fun onSetMotionEventState(controllerNumber: Short, motionType: Byte, reportRateHz: Short) {
@@ -998,21 +1016,17 @@ class StreamSessionController(
     ) {
         if (!_isStreaming.value || _currentStageName.value != "Connected" || controllerPermissionDenied) return
         refreshControllerRegistration()
-        if (controllerRemovalPending || (physicalController != null && !controllerRegistered)) return
+        val controller = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }
+        if (controller != null && registeredControllers and (1 shl controller.slot) == 0) return
         val state = ControllerState(buttonFlags, leftTrigger, rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY)
-        if (physicalController != null && state == lastControllerState) return
+        if (controller?.state == state) return
+        val keepSlot = if (currentSettings?.features?.persistentGamepad == true) 1 else 0
+        val mask = registeredControllers or (1 shl controllerNumber.toInt()) or keepSlot
         val result = MoonBridge.sendMultiControllerInput(
-            controllerNumber, 1, buttonFlags, leftTrigger, rightTrigger,
+            controllerNumber, mask.toShort(), buttonFlags, leftTrigger, rightTrigger,
             leftStickX, leftStickY, rightStickX, rightStickY
         )
-        if (!checkControllerResult("send input for", result) || physicalController == null) return
-        lastControllerState = state
-        if (!controllerInputReceived && (buttonFlags != 0 || leftTrigger != 0.toByte() ||
-                rightTrigger != 0.toByte() || leftStickX != 0.toShort() || leftStickY != 0.toShort() ||
-                rightStickX != 0.toShort() || rightStickY != 0.toShort())) {
-            controllerInputReceived = true
-            AppLogger.info("Queued physical controller input for host", "GAMEPAD")
-        }
+        if (checkControllerResult("send input for", result)) controller?.state = state
     }
 
     override fun onGamepadMenuRequested() {
