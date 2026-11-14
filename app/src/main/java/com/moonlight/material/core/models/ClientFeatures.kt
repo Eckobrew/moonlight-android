@@ -10,6 +10,9 @@ enum class DecoderPreference {
 }
 
 @Serializable
+enum class GamepadScrollStick { LEFT, RIGHT, NONE }
+
+@Serializable
 enum class VirtualDisplayMode {
     HOST_DEFAULT,
     VIRTUAL,
@@ -36,5 +39,6 @@ data class ClientFeatures(
     val touchOverlayEnabled: Boolean = true,
     val touchOverlayOpacity: Float = 0.65f,
     val touchHapticsEnabled: Boolean = true,
-    val stretchToFit: Boolean = false
+    val stretchToFit: Boolean = false,
+    val gamepadScrollStick: GamepadScrollStick = GamepadScrollStick.RIGHT
 )

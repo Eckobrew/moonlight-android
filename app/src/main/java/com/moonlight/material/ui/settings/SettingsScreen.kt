@@ -411,6 +411,19 @@ private fun ControllerSettingsTab(settings: StreamSettings, onUpdate: (StreamSet
             onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(gamepadMouse = it))) }
         )
 
+        if (settings.features.gamepadMouse) {
+            Text("Controller Scroll Stick", color = TextSecondary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.moonlight.material.core.models.GamepadScrollStick.entries.forEach { stick ->
+                    FilterChip(
+                        selected = settings.features.gamepadScrollStick == stick,
+                        onClick = { onUpdate(settings.copy(features = settings.features.copy(gamepadScrollStick = stick))) },
+                        label = { Text(stick.name.lowercase().replaceFirstChar { it.uppercaseChar() }) }
+                    )
+                }
+            }
+        }
+
         SettingToggle(
             title = "Swap Face Buttons (Nintendo A/B X/Y)",
             checked = settings.features.swapFaceButtons,

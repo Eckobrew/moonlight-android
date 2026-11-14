@@ -1,5 +1,7 @@
 package com.moonlight.material.stream.input
 
+import com.moonlight.material.core.models.GamepadScrollStick
+import kotlin.math.hypot
 import android.os.Handler
 import android.os.Looper
 import android.view.InputDevice
@@ -25,6 +27,7 @@ interface GamepadListener {
     fun onEmulatedMouseMove(deltaX: Short, deltaY: Short)
     fun onEmulatedMouseButton(button: Byte, isDown: Boolean)
     fun onEmulatedMouseScroll(scroll: Short)
+    fun onEmulatedMouseHorizontalScroll(scroll: Short) {}
 }
 
 class GamepadHandler(
@@ -42,6 +45,7 @@ class GamepadHandler(
     }
 
     private val TAG = "GAMEPAD"
+    var scrollStick = GamepadScrollStick.RIGHT
     private var isMouseEmulationMode = false
     private val handler: Handler? by lazy {
         try {
@@ -84,14 +88,24 @@ class GamepadHandler(
     private val mouseMotionRunnable = object : Runnable {
         override fun run() {
             if (!isMouseEmulationMode) return
-            val deltaX = (leftStickX * 15 / 32767).toShort()
-            val deltaY = (-leftStickY * 15 / 32767).toShort()
-            if (deltaX.toInt() != 0 || deltaY.toInt() != 0) {
-                listener.onEmulatedMouseMove(deltaX, deltaY)
-            }
-            val scrollY = (rightStickY * 5 / 32767).toShort()
-            if (scrollY.toInt() != 0) listener.onEmulatedMouseScroll(scrollY)
+            sendStickMouseInput(leftStickX, leftStickY, scrollStick == GamepadScrollStick.LEFT)
+            sendStickMouseInput(rightStickX, rightStickY, scrollStick == GamepadScrollStick.RIGHT)
             handler?.postDelayed(this, 50L)
+        }
+    }
+
+    private fun sendStickMouseInput(stickX: Short, stickY: Short, scroll: Boolean) {
+        val x = stickX * (4.0 / 32766.0)
+        val y = stickY * (4.0 / 32766.0)
+        val magnitudeSquared = x * x + y * y
+        if (magnitudeSquared * hypot(x, y) < 1.0) return
+        val dx = (x * magnitudeSquared).toInt().toShort()
+        val dy = (y * magnitudeSquared).toInt().toShort()
+        if (scroll) {
+            if (dy.toInt() != 0) listener.onEmulatedMouseScroll(dy)
+            if (dx.toInt() != 0) listener.onEmulatedMouseHorizontalScroll(dx)
+        } else {
+            listener.onEmulatedMouseMove(dx, (-dy).toShort())
         }
     }
 
@@ -178,15 +192,15 @@ class GamepadHandler(
         }
 
         if (isMouseEmulationMode) {
-            when (keyCode) {
-                KeyEvent.KEYCODE_BUTTON_A -> {
+            when (mapKeyCodeToButton(keyCode)) {
+                ControllerButtonFlags.A -> {
                     if (leftMouseDown != isDown) {
                         leftMouseDown = isDown
                         listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_LEFT, isDown)
                     }
                     return true
                 }
-                KeyEvent.KEYCODE_BUTTON_B -> {
+                ControllerButtonFlags.B -> {
                     if (rightMouseDown != isDown) {
                         rightMouseDown = isDown
                         listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_RIGHT, isDown)

@@ -170,6 +170,7 @@ class StreamSessionController(
         currentSettings?.features?.let {
             controller.handler.swapFaceButtons = it.swapFaceButtons
             controller.handler.gamepadMouseEnabled = it.gamepadMouse
+            controller.handler.scrollStick = it.gamepadScrollStick
         }
         if (refresh && _currentStageName.value == "Connected") refreshControllerRegistration()
         return controller.handler
@@ -434,6 +435,7 @@ class StreamSessionController(
                 controllers.values.forEach {
                     it.handler.swapFaceButtons = settings.features.swapFaceButtons
                     it.handler.gamepadMouseEnabled = settings.features.gamepadMouse
+                    it.handler.scrollStick = settings.features.gamepadScrollStick
                 }
                 setTouchpadMode(settings.features.desktopMouse)
                 touchMouseHandler.mouseSensitivityX = settings.mouseSensitivityX * settings.mouseSensitivity
@@ -1059,6 +1061,10 @@ class StreamSessionController(
 
     override fun onEmulatedMouseButton(button: Byte, isDown: Boolean) {
         onMouseButton(button, isDown)
+    }
+
+    override fun onEmulatedMouseHorizontalScroll(scroll: Short) {
+        onMouseHorizontalScroll(scroll)
     }
 
     override fun onEmulatedMouseScroll(scroll: Short) {
