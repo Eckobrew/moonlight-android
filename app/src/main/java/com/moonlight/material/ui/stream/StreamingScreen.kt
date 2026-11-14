@@ -1,7 +1,6 @@
 package com.moonlight.material.ui.stream
 
 import android.hardware.input.InputManager
-import android.view.InputDevice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -34,6 +33,7 @@ import com.moonlight.material.core.models.Host
 import com.moonlight.material.core.models.StreamApp
 import com.moonlight.material.core.models.StreamSettings
 import com.moonlight.material.core.state.StreamSessionController
+import com.moonlight.material.stream.input.GamepadHandler
 import com.moonlight.material.ui.theme.*
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -69,16 +69,18 @@ fun StreamingScreen(
     }
     var controllerEnabled by rememberSaveable { mutableStateOf(settings.features.touchOverlayEnabled) }
     val context = LocalContext.current
-    var physicalControllerConnected by remember { mutableStateOf(false) }
-    DisposableEffect(context) {
+    var physicalControllerId by remember { mutableStateOf<Int?>(null) }
+    val physicalControllerConnected = physicalControllerId != null
+    DisposableEffect(context, session) {
         val manager = context.getSystemService(Context.INPUT_SERVICE) as InputManager
         fun refreshDevices() {
-            physicalControllerConnected = manager.inputDeviceIds.any { id ->
-                manager.getInputDevice(id)?.let { device ->
-                    !device.isVirtual && (device.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
-                        device.supportsSource(InputDevice.SOURCE_JOYSTICK))
-                } == true
-            }
+            val devices = manager.inputDeviceIds.asSequence()
+                .mapNotNull(manager::getInputDevice)
+                .filter(GamepadHandler::isGamepad)
+                .toList()
+            val device = devices.firstOrNull { it.id == physicalControllerId } ?: devices.firstOrNull()
+            physicalControllerId = device?.id
+            session.updatePhysicalController(device)
         }
         val listener = object : InputManager.InputDeviceListener {
             override fun onInputDeviceAdded(deviceId: Int) = refreshDevices()
@@ -87,11 +89,16 @@ fun StreamingScreen(
         }
         manager.registerInputDeviceListener(listener, Handler(Looper.getMainLooper()))
         refreshDevices()
-        onDispose { manager.unregisterInputDeviceListener(listener) }
+        onDispose {
+            manager.unregisterInputDeviceListener(listener)
+            session.updatePhysicalController(null)
+        }
     }
-    SideEffect { session.localInputActive = showKeyboardOverlay || showControlsSheet || stageName != "Connected" }
+    // Read overlay state during composition so this effect updates when either overlay changes.
+    val keyboardOverlayActive = showKeyboardOverlay
+    SideEffect { session.keyboardOverlayActive = keyboardOverlayActive }
     DisposableEffect(session) {
-        onDispose { session.localInputActive = false }
+        onDispose { session.keyboardOverlayActive = false }
     }
     var hadStream by remember { mutableStateOf(false) }
     LaunchedEffect(isStreaming, sessionError) {
@@ -132,20 +139,12 @@ fun StreamingScreen(
                     })
 
                     setOnGenericMotionListener { _, event ->
-                        if (session.gamepadHandler.handleGenericMotionEvent(event)) {
-                            true
-                        } else {
-                            session.touchMouseHandler.handleGenericMotion(event)
-                        }
+                        session.touchMouseHandler.handleGenericMotion(event)
                     }
 
                     setOnKeyListener { _, _, event ->
                         if (session.localInputActive) return@setOnKeyListener false
-                        if (session.gamepadHandler.handleKeyEvent(event)) {
-                            true
-                        } else {
-                            session.handleKeyEvent(event)
-                        }
+                        session.handleKeyEvent(event)
                     }
                 }
             },
@@ -230,10 +229,15 @@ fun StreamingScreen(
             )
         }
 
-        if (connectionWarning != null && stageName == "Connected" && !showControlsSheet && !showKeyboardOverlay) {
+        val warning = if (physicalControllerConnected && session.controllerPermissionDenied) {
+            "The host blocks controller input for this device. Enable controller permission in the host's paired clients settings."
+        } else {
+            connectionWarning
+        }
+        if (warning != null && stageName == "Connected" && !showControlsSheet && !showKeyboardOverlay) {
             Surface(modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
                 color = MidnightBlue.copy(alpha = 0.85f), shape = MaterialTheme.shapes.small) {
-                Text(connectionWarning!!, color = AmberWarning, modifier = Modifier.padding(12.dp))
+                Text(warning, color = AmberWarning, modifier = Modifier.padding(12.dp))
             }
         }
 

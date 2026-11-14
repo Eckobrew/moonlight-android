@@ -19,6 +19,9 @@ object ControllerButtonFlags {
     const val B = 0x2000
     const val X = 0x4000
     const val Y = 0x8000
+
+    const val STANDARD_BUTTONS = UP or DOWN or LEFT or RIGHT or START or BACK or LS_CLK or
+        RS_CLK or LB or RB or SPECIAL or A or B or X or Y
 }
 
 /**

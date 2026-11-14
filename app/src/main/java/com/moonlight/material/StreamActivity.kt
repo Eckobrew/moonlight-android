@@ -2,6 +2,7 @@ package com.moonlight.material
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -90,16 +91,35 @@ class StreamActivity : ComponentActivity() {
         }
     }
 
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (::sessionController.isInitialized && sessionController.canForwardGamepadInput &&
+            sessionController.acceptsPhysicalController(event.deviceId, event.device) &&
+            sessionController.gamepadHandler.handleGenericMotionEvent(event)) {
+            return true
+        }
+        return super.dispatchGenericMotionEvent(event)
+    }
+
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
-        if (::sessionController.isInitialized) {
-            if (sessionController.gamepadHandler.handleGenericMotionEvent(event)) {
-                return true
-            }
-            if (sessionController.touchMouseHandler.handleGenericMotion(event)) {
+        if (::sessionController.isInitialized && sessionController.touchMouseHandler.handleGenericMotion(event)) {
+            return true
+        }
+        return super.onGenericMotionEvent(event)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (::sessionController.isInitialized && sessionController.canForwardGamepadInput &&
+            sessionController.acceptsPhysicalController(event.deviceId, event.device)) {
+            // Some pads report a key as Android Back. A physical pad must not
+            // trigger the stream menu or Android's fallback from BUTTON_B to BACK.
+            if (sessionController.gamepadHandler.handleKeyEvent(event)) return true
+            if (event.keyCode == KeyEvent.KEYCODE_BACK ||
+                KeyEvent.isGamepadButton(event.keyCode) ||
+                event.isFromSource(InputDevice.SOURCE_GAMEPAD)) {
                 return true
             }
         }
-        return super.onGenericMotionEvent(event)
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -111,9 +131,6 @@ class StreamActivity : ComponentActivity() {
             return super.onKeyDown(keyCode, event)
         }
         if (::sessionController.isInitialized && sessionController.isStreaming.value) {
-            if (sessionController.gamepadHandler.handleKeyEvent(event)) {
-                return true
-            }
             if (sessionController.handleKeyEvent(event)) {
                 return true
             }
@@ -130,9 +147,6 @@ class StreamActivity : ComponentActivity() {
             return super.onKeyUp(keyCode, event)
         }
         if (::sessionController.isInitialized && sessionController.isStreaming.value) {
-            if (sessionController.gamepadHandler.handleKeyEvent(event)) {
-                return true
-            }
             if (sessionController.handleKeyEvent(event)) {
                 return true
             }

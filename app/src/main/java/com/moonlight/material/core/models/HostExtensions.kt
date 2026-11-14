@@ -19,6 +19,7 @@ data class HostCapabilities(
     fun allows(perm: Long): Boolean = permission?.let { (it and perm) != 0L } ?: true
     val canView: Boolean get() = allows((1L shl 25) or (1L shl 26))
     val canLaunch: Boolean get() = allows(1L shl 26)
+    val canSendControllerInput: Boolean get() = allows(1L shl 8)
     val canRunCommands: Boolean get() = allows(1L shl 20)
 
     companion object {

@@ -20,6 +20,8 @@ interface GamepadListener {
         rightStickY: Short
     )
 
+    fun onGamepadMenuRequested() {}
+
     fun onEmulatedMouseMove(deltaX: Short, deltaY: Short)
     fun onEmulatedMouseButton(button: Byte, isDown: Boolean)
     fun onEmulatedMouseScroll(scroll: Short)
@@ -30,6 +32,14 @@ class GamepadHandler(
     var swapFaceButtons: Boolean = false,
     var gamepadMouseEnabled: Boolean = true
 ) {
+    companion object {
+        const val BUTTON_HOLD_SECONDS = 3
+
+        fun isGamepad(device: InputDevice): Boolean =
+            !device.isVirtual && (device.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
+                device.supportsSource(InputDevice.SOURCE_JOYSTICK))
+    }
+
     private val TAG = "GAMEPAD"
     private var isMouseEmulationMode = false
     private val handler: Handler? by lazy {
@@ -41,6 +51,11 @@ class GamepadHandler(
     }
 
     private var buttonFlags = 0
+    private var hatFlags = 0
+    private var leftTriggerPressed = false
+    private var rightTriggerPressed = false
+    private var leftMouseDown = false
+    private var rightMouseDown = false
     private var leftTrigger: Byte = 0
     private var rightTrigger: Byte = 0
     private var leftStickX: Short = 0
@@ -48,13 +63,62 @@ class GamepadHandler(
     private var rightStickX: Short = 0
     private var rightStickY: Short = 0
 
-    // Holding start for 1 second toggles mouse emulation
+    // Holding Start toggles mouse emulation.
     private val startHoldRunnable = Runnable {
-        isMouseEmulationMode = !isMouseEmulationMode
+        if (!gamepadMouseEnabled) return@Runnable
+        val enableMouseMode = !isMouseEmulationMode
+        reset()
+        isMouseEmulationMode = enableMouseMode
+        if (enableMouseMode) handler?.postDelayed(mouseMotionRunnable, 50L)
+        notifyState()
         AppLogger.info("Gamepad mouse emulation toggled: $isMouseEmulationMode", TAG)
     }
 
+    private val backHoldRunnable = Runnable {
+        reset(keepMouseMode = true)
+        notifyState()
+        listener.onGamepadMenuRequested()
+    }
+
+    private val mouseMotionRunnable = object : Runnable {
+        override fun run() {
+            if (!isMouseEmulationMode) return
+            val deltaX = (leftStickX * 15 / 32767).toShort()
+            val deltaY = (-leftStickY * 15 / 32767).toShort()
+            if (deltaX.toInt() != 0 || deltaY.toInt() != 0) {
+                listener.onEmulatedMouseMove(deltaX, deltaY)
+            }
+            val scrollY = (rightStickY * 5 / 32767).toShort()
+            if (scrollY.toInt() != 0) listener.onEmulatedMouseScroll(scrollY)
+            handler?.postDelayed(this, 50L)
+        }
+    }
+
+    fun reset(keepMouseMode: Boolean = false) {
+        handler?.removeCallbacks(startHoldRunnable)
+        handler?.removeCallbacks(backHoldRunnable)
+        if (leftMouseDown) listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_LEFT, false)
+        if (rightMouseDown) listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_RIGHT, false)
+        leftMouseDown = false
+        rightMouseDown = false
+        if (!keepMouseMode) {
+            isMouseEmulationMode = false
+            handler?.removeCallbacks(mouseMotionRunnable)
+        }
+        buttonFlags = 0
+        hatFlags = 0
+        leftTriggerPressed = false
+        rightTriggerPressed = false
+        leftTrigger = 0
+        rightTrigger = 0
+        leftStickX = 0
+        leftStickY = 0
+        rightStickX = 0
+        rightStickY = 0
+    }
+
     fun handleGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked != MotionEvent.ACTION_MOVE) return false
         if ((event.source and InputDevice.SOURCE_JOYSTICK) != InputDevice.SOURCE_JOYSTICK &&
             (event.source and InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD) {
             return false
@@ -62,8 +126,10 @@ class GamepadHandler(
 
         val lx = getCenteredAxis(event, MotionEvent.AXIS_X)
         val ly = getCenteredAxis(event, MotionEvent.AXIS_Y)
-        val rx = getCenteredAxis(event, MotionEvent.AXIS_Z)
-        val ry = getCenteredAxis(event, MotionEvent.AXIS_RZ)
+        val hasZStick = event.device?.getMotionRange(MotionEvent.AXIS_Z, event.source) != null &&
+            event.device?.getMotionRange(MotionEvent.AXIS_RZ, event.source) != null
+        val rx = getCenteredAxis(event, if (hasZStick) MotionEvent.AXIS_Z else MotionEvent.AXIS_RX)
+        val ry = getCenteredAxis(event, if (hasZStick) MotionEvent.AXIS_RZ else MotionEvent.AXIS_RY)
 
         val lt = event.getAxisValue(MotionEvent.AXIS_LTRIGGER).takeIf { it > 0 }
             ?: event.getAxisValue(MotionEvent.AXIS_BRAKE)
@@ -74,11 +140,11 @@ class GamepadHandler(
         val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
         val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
 
-        buttonFlags = buttonFlags and (ControllerButtonFlags.UP or ControllerButtonFlags.DOWN or ControllerButtonFlags.LEFT or ControllerButtonFlags.RIGHT).inv()
-        if (hatY < -0.5f) buttonFlags = buttonFlags or ControllerButtonFlags.UP
-        if (hatY > 0.5f) buttonFlags = buttonFlags or ControllerButtonFlags.DOWN
-        if (hatX < -0.5f) buttonFlags = buttonFlags or ControllerButtonFlags.LEFT
-        if (hatX > 0.5f) buttonFlags = buttonFlags or ControllerButtonFlags.RIGHT
+        hatFlags = 0
+        if (hatY < -0.5f) hatFlags = hatFlags or ControllerButtonFlags.UP
+        if (hatY > 0.5f) hatFlags = hatFlags or ControllerButtonFlags.DOWN
+        if (hatX < -0.5f) hatFlags = hatFlags or ControllerButtonFlags.LEFT
+        if (hatX > 0.5f) hatFlags = hatFlags or ControllerButtonFlags.RIGHT
 
         leftTrigger = (lt.coerceIn(0f, 1f) * 255).toInt().toByte()
         rightTrigger = (rt.coerceIn(0f, 1f) * 255).toInt().toByte()
@@ -88,20 +154,7 @@ class GamepadHandler(
         rightStickX = (rx * 32767).toInt().toShort()
         rightStickY = (-ry * 32767).toInt().toShort()
 
-        if (isMouseEmulationMode) {
-            val deltaX = (lx * 15).toInt().toShort()
-            val deltaY = (ly * 15).toInt().toShort()
-            if (abs(deltaX.toInt()) > 0 || abs(deltaY.toInt()) > 0) {
-                listener.onEmulatedMouseMove(deltaX, deltaY)
-            }
-            val scrollY = (-ry * 5).toInt().toShort()
-            if (abs(scrollY.toInt()) > 0) {
-                listener.onEmulatedMouseScroll(scrollY)
-            }
-            return true
-        }
-
-        notifyState()
+        if (!isMouseEmulationMode) notifyState()
         return true
     }
 
@@ -109,39 +162,75 @@ class GamepadHandler(
         // Check for hold-Start to toggle mouse emulation
         if (keyCode == KeyEvent.KEYCODE_BUTTON_START && gamepadMouseEnabled) {
             if (isDown && repeatCount == 0) {
-                handler?.postDelayed(startHoldRunnable, 1000L)
+                handler?.postDelayed(startHoldRunnable, BUTTON_HOLD_SECONDS * 1000L)
             } else if (!isDown) {
                 handler?.removeCallbacks(startHoldRunnable)
+            }
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_BUTTON_SELECT) {
+            if (isDown && repeatCount == 0) {
+                handler?.postDelayed(backHoldRunnable, BUTTON_HOLD_SECONDS * 1000L)
+            } else if (!isDown) {
+                handler?.removeCallbacks(backHoldRunnable)
             }
         }
 
         if (isMouseEmulationMode) {
             when (keyCode) {
                 KeyEvent.KEYCODE_BUTTON_A -> {
-                    listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_LEFT, isDown)
+                    if (leftMouseDown != isDown) {
+                        leftMouseDown = isDown
+                        listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_LEFT, isDown)
+                    }
                     return true
                 }
                 KeyEvent.KEYCODE_BUTTON_B -> {
-                    listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_RIGHT, isDown)
+                    if (rightMouseDown != isDown) {
+                        rightMouseDown = isDown
+                        listener.onEmulatedMouseButton(MouseButtonCodes.BUTTON_RIGHT, isDown)
+                    }
                     return true
                 }
             }
         }
 
-        val buttonMask = mapKeyCodeToButton(keyCode) ?: return false
-
-        buttonFlags = if (isDown) {
-            buttonFlags or buttonMask
-        } else {
-            buttonFlags and buttonMask.inv()
+        when (keyCode) {
+            KeyEvent.KEYCODE_BUTTON_L2 -> leftTriggerPressed = isDown
+            KeyEvent.KEYCODE_BUTTON_R2 -> rightTriggerPressed = isDown
+            else -> {
+                val buttonMask = mapKeyCodeToButton(keyCode) ?: return false
+                buttonFlags = if (isDown) buttonFlags or buttonMask else buttonFlags and buttonMask.inv()
+            }
         }
 
-        notifyState()
+        if (!isMouseEmulationMode) notifyState()
         return true
     }
 
     fun handleKeyEvent(event: KeyEvent): Boolean {
-        return handleButton(event.keyCode, event.action == KeyEvent.ACTION_DOWN, event.repeatCount)
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
+        val triggerAxes = when (event.keyCode) {
+            KeyEvent.KEYCODE_BUTTON_L2 -> MotionEvent.AXIS_LTRIGGER to MotionEvent.AXIS_BRAKE
+            KeyEvent.KEYCODE_BUTTON_R2 -> MotionEvent.AXIS_RTRIGGER to MotionEvent.AXIS_GAS
+            else -> null
+        }
+        if (triggerAxes != null && event.device?.let { device ->
+                device.getMotionRange(triggerAxes.first, InputDevice.SOURCE_JOYSTICK) != null ||
+                    device.getMotionRange(triggerAxes.second, InputDevice.SOURCE_JOYSTICK) != null
+            } == true) {
+            return true
+        }
+        val keyCode = if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.flags and KeyEvent.FLAG_FALLBACK != 0) {
+                KeyEvent.KEYCODE_BUTTON_B
+            } else {
+                KeyEvent.KEYCODE_BUTTON_SELECT
+            }
+        } else {
+            event.keyCode
+        }
+        return handleButton(keyCode, event.action == KeyEvent.ACTION_DOWN, event.repeatCount)
     }
 
     private fun mapKeyCodeToButton(keyCode: Int): Int? {
@@ -175,9 +264,9 @@ class GamepadHandler(
     private fun notifyState() {
         listener.onControllerStateChanged(
             controllerNumber = 0,
-            buttonFlags = buttonFlags,
-            leftTrigger = leftTrigger,
-            rightTrigger = rightTrigger,
+            buttonFlags = buttonFlags or hatFlags,
+            leftTrigger = if (leftTriggerPressed) 255.toByte() else leftTrigger,
+            rightTrigger = if (rightTriggerPressed) 255.toByte() else rightTrigger,
             leftStickX = leftStickX,
             leftStickY = leftStickY,
             rightStickX = rightStickX,

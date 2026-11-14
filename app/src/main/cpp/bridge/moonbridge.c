@@ -690,13 +690,13 @@ Java_com_moonlight_material_bridge_MoonBridge_sendUtf8TextBytes(JNIEnv *env, jcl
     return result;
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jint JNICALL
 Java_com_moonlight_material_bridge_MoonBridge_sendMultiControllerInput(JNIEnv *env, jclass clazz, jshort controllerNumber,
                                                            jshort activeGamepadMask, jint buttonFlags,
                                                            jbyte leftTrigger, jbyte rightTrigger,
                                                            jshort leftStickX, jshort leftStickY,
                                                            jshort rightStickX, jshort rightStickY) {
-    LiSendMultiControllerEvent(controllerNumber, activeGamepadMask, buttonFlags,
+    return LiSendMultiControllerEvent(controllerNumber, activeGamepadMask, buttonFlags,
         leftTrigger, rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY);
 }
 

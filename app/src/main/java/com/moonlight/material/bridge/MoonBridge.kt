@@ -356,7 +356,7 @@ object MoonBridge {
         leftStickY: Short,
         rightStickX: Short,
         rightStickY: Short
-    )
+    ): Int
 
     @JvmStatic
     external fun sendTouchEvent(

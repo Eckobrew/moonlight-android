@@ -387,7 +387,7 @@ private fun ControllerSettingsTab(settings: StreamSettings, onUpdate: (StreamSet
     SectionCard(title = "Hardware Gamepad Options") {
         SettingToggle(
             title = "Controller Mouse Emulation",
-            subtitle = "Hold Start for 1 second to toggle pointer emulation",
+            subtitle = "Hold Start for 3 seconds to toggle pointer emulation",
             checked = settings.features.gamepadMouse,
             onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(gamepadMouse = it))) }
         )

@@ -87,6 +87,35 @@ class GamepadHandlerTest {
     }
 
     @Test
+    fun digitalTriggerButtonsReportFullPressAndRelease() {
+        val listener = TestGamepadListener()
+        val handler = GamepadHandler(listener)
+
+        assertTrue(handler.handleButton(KeyEvent.KEYCODE_BUTTON_L2, true))
+        assertTrue(handler.handleButton(KeyEvent.KEYCODE_BUTTON_R2, true))
+        assertEquals(255.toByte(), listener.lastLeftTrigger)
+        assertEquals(255.toByte(), listener.lastRightTrigger)
+
+        handler.handleButton(KeyEvent.KEYCODE_BUTTON_L2, false)
+        assertEquals(0.toByte(), listener.lastLeftTrigger)
+        assertEquals(255.toByte(), listener.lastRightTrigger)
+    }
+
+    @Test
+    fun resetClearsInputsBeforeReplacementControllerSendsState() {
+        val listener = TestGamepadListener()
+        val handler = GamepadHandler(listener)
+        handler.handleButton(KeyEvent.KEYCODE_BUTTON_A, true)
+        handler.handleButton(KeyEvent.KEYCODE_BUTTON_R2, true)
+
+        handler.reset()
+        handler.handleButton(KeyEvent.KEYCODE_BUTTON_X, true)
+
+        assertEquals(ControllerButtonFlags.X, listener.lastButtonFlags)
+        assertEquals(0.toByte(), listener.lastRightTrigger)
+    }
+
+    @Test
     fun rumbleHandlerExecutesWithoutCrashing() {
         val listener = TestGamepadListener()
         val handler = GamepadHandler(listener)
