@@ -523,6 +523,20 @@ private fun InputSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
         )
 
         SettingToggle(
+            title = "Remote Desktop Optimized Mouse",
+            subtitle = "Send relative motion as normalized screen positions to avoid cursor acceleration drift in Remote Desktop / VMs",
+            checked = settings.features.absoluteMouseMode,
+            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(absoluteMouseMode = it))) }
+        )
+
+        SettingToggle(
+            title = "Mouse Forward & Back Buttons",
+            subtitle = "Forward mouse side buttons (X1/X2) to host instead of acting as Right-Click / Back",
+            checked = settings.features.mouseNavButtons,
+            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(mouseNavButtons = it))) }
+        )
+
+        SettingToggle(
             title = "Swap Left and Right Mouse Buttons",
             checked = settings.features.swapMouseButtons,
             onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(swapMouseButtons = it))) }

@@ -137,10 +137,19 @@ fun StreamingScreen(
         }
         // Video SurfaceView
         val inputCaptured by session.inputCaptured.collectAsState()
+        val localCursorVisible by session.localCursorVisible.collectAsState()
         val captureMouse = inputCaptured && physicalMouseConnected && stageName == "Connected" && !showKeyboardOverlay && !showControlsSheet
         AndroidView(
             factory = { context ->
                 object : SurfaceView(context) {
+                    private val retryPointerCaptureRunnable = Runnable {
+                        if (hasWindowFocus() && hasFocus() && !session.localInputActive &&
+                            physicalMouseConnected && session.inputCaptured.value && !hasPointerCapture()
+                        ) {
+                            requestPointerCapture()
+                        }
+                    }
+
                     override fun onPointerCaptureChange(hasCapture: Boolean) {
                         super.onPointerCaptureChange(hasCapture)
                         if (!hasCapture) session.touchMouseHandler.releasePhysicalMouse()
@@ -148,8 +157,14 @@ fun StreamingScreen(
 
                     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                         super.onWindowFocusChanged(hasWindowFocus)
+                        removeCallbacks(retryPointerCaptureRunnable)
                         if (hasWindowFocus && hasFocus() && !session.localInputActive &&
-                            physicalMouseConnected && session.inputCaptured.value) requestPointerCapture()
+                            physicalMouseConnected && session.inputCaptured.value
+                        ) {
+                            requestPointerCapture()
+                            // Android 10+ (Q+) may drop pointer capture requests during window focus transitions; retry after 500ms
+                            postDelayed(retryPointerCaptureRunnable, 500L)
+                        }
                     }
                 }.apply {
                     isFocusableInTouchMode = true
@@ -223,7 +238,7 @@ fun StreamingScreen(
             },
             update = { view ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    view.pointerIcon = if (inputCaptured && stageName == "Connected" && !showControlsSheet) {
+                    view.pointerIcon = if (inputCaptured && !localCursorVisible && stageName == "Connected" && !showControlsSheet) {
                         android.view.PointerIcon.getSystemIcon(view.context, android.view.PointerIcon.TYPE_NULL)
                     } else {
                         null
@@ -231,7 +246,16 @@ fun StreamingScreen(
                 }
                 if (captureMouse) {
                     view.requestFocus()
-                    if (view.hasWindowFocus() && !view.hasPointerCapture()) view.requestPointerCapture()
+                    if (view.hasWindowFocus() && !view.hasPointerCapture()) {
+                        view.requestPointerCapture()
+                        view.postDelayed({
+                            if (view.hasWindowFocus() && view.hasFocus() && !session.localInputActive &&
+                                physicalMouseConnected && session.inputCaptured.value && !view.hasPointerCapture()
+                            ) {
+                                view.requestPointerCapture()
+                            }
+                        }, 500L)
+                    }
                 } else {
                     if (view.hasPointerCapture()) view.releasePointerCapture()
                     session.touchMouseHandler.releasePhysicalMouse()

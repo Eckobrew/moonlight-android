@@ -508,6 +508,21 @@ class StreamSessionController(
     private val _inputCaptured = MutableStateFlow(true)
     val inputCaptured: StateFlow<Boolean> = _inputCaptured.asStateFlow()
 
+    private val _localCursorVisible = MutableStateFlow(false)
+    val localCursorVisible: StateFlow<Boolean> = _localCursorVisible.asStateFlow()
+
+    fun toggleLocalCursorVisibility() {
+        _localCursorVisible.value = !_localCursorVisible.value
+        val ctx = applicationContext ?: return
+        scope.launch(Dispatchers.Main) {
+            Toast.makeText(
+                ctx,
+                if (_localCursorVisible.value) "Local mouse cursor: Visible" else "Local mouse cursor: Hidden",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     fun toggleInputCapture() {
         _inputCaptured.value = !_inputCaptured.value
         if (!_inputCaptured.value) touchMouseHandler.releasePhysicalMouse()
@@ -681,6 +696,8 @@ class StreamSessionController(
                     it.handler.stickDeadzonePercent = settings.features.stickDeadzonePercent
                 }
                 setTouchpadMode(settings.features.desktopMouse)
+                touchMouseHandler.absoluteMouseMode = settings.features.absoluteMouseMode
+                touchMouseHandler.mouseNavButtons = settings.features.mouseNavButtons
                 touchMouseHandler.mouseSensitivityX = settings.mouseSensitivityX * settings.mouseSensitivity
                 touchMouseHandler.mouseSensitivityY = settings.mouseSensitivityY * settings.mouseSensitivity
                 touchMouseHandler.mouseSubPixelAccumulation = settings.mouseSubPixelAccumulation
@@ -1712,6 +1729,13 @@ class StreamSessionController(
         if (!_isStreaming.value) return
         try {
             MoonBridge.sendMouseMove(deltaX, deltaY)
+        } catch (_: Throwable) {}
+    }
+
+    override fun onMouseMoveAsMousePosition(deltaX: Short, deltaY: Short, screenW: Short, screenH: Short) {
+        if (!_isStreaming.value) return
+        try {
+            MoonBridge.sendMouseMoveAsMousePosition(deltaX, deltaY, screenW, screenH)
         } catch (_: Throwable) {}
     }
 

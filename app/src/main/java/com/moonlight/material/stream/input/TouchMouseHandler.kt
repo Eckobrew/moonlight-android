@@ -37,6 +37,9 @@ interface MouseEventListener {
     ): Int = -5501
 
     fun onMouseMoveRelative(deltaX: Short, deltaY: Short)
+    fun onMouseMoveAsMousePosition(deltaX: Short, deltaY: Short, screenW: Short, screenH: Short) {
+        onMouseMoveRelative(deltaX, deltaY)
+    }
     fun onMouseMoveAbsolute(x: Short, y: Short, screenW: Short, screenH: Short)
     fun onMouseButton(button: Byte, isDown: Boolean)
     fun onMouseScroll(amount: Short)
@@ -58,6 +61,8 @@ interface MouseEventListener {
 class TouchMouseHandler(
     private val listener: MouseEventListener,
     var isDesktopMouseMode: Boolean = false,
+    var absoluteMouseMode: Boolean = false,
+    var mouseNavButtons: Boolean = true,
     var mouseSensitivityX: Double = 1.0,
     var mouseSensitivityY: Double = 1.0,
     var mouseSubPixelAccumulation: Boolean = true,
@@ -180,12 +185,27 @@ class TouchMouseHandler(
         physicalButtons = buttons
         for ((mask, code) in PHYSICAL_BUTTONS) {
             if (changed and mask == 0) continue
+            if (!mouseNavButtons && (mask == MotionEvent.BUTTON_BACK || mask == MotionEvent.BUTTON_FORWARD)) {
+                if (mask == MotionEvent.BUTTON_BACK) {
+                    val rightBtn = if (swapMouseButtons) MouseButtonCodes.BUTTON_LEFT else MouseButtonCodes.BUTTON_RIGHT
+                    listener.onMouseButton(rightBtn, buttons and mask != 0)
+                }
+                continue
+            }
             val mapped = when {
                 swapMouseButtons && code == MouseButtonCodes.BUTTON_LEFT -> MouseButtonCodes.BUTTON_RIGHT
                 swapMouseButtons && code == MouseButtonCodes.BUTTON_RIGHT -> MouseButtonCodes.BUTTON_LEFT
                 else -> code
             }
             listener.onMouseButton(mapped, buttons and mask != 0)
+        }
+    }
+
+    private fun dispatchRelativeMouseMove(deltaX: Short, deltaY: Short, viewWidth: Int, viewHeight: Int) {
+        if (absoluteMouseMode && viewWidth > 0 && viewHeight > 0) {
+            listener.onMouseMoveAsMousePosition(deltaX, deltaY, viewWidth.toShort(), viewHeight.toShort())
+        } else {
+            listener.onMouseMoveRelative(deltaX, deltaY)
         }
     }
 
@@ -506,7 +526,7 @@ class TouchMouseHandler(
                                 accumulateSensitivity = mouseSubPixelAccumulation
                             )
                             if (hdx.toInt() != 0 || hdy.toInt() != 0) {
-                                listener.onMouseMoveRelative(hdx, hdy)
+                                dispatchRelativeMouseMove(hdx, hdy, viewWidth, viewHeight)
                             }
                             lastX = hx
                             lastY = hy
@@ -522,7 +542,7 @@ class TouchMouseHandler(
                             accumulateSensitivity = mouseSubPixelAccumulation
                         )
                         if (deltaX.toInt() != 0 || deltaY.toInt() != 0) {
-                            listener.onMouseMoveRelative(deltaX, deltaY)
+                            dispatchRelativeMouseMove(deltaX, deltaY, viewWidth, viewHeight)
                         }
                     } else if (viewWidth > 0 && viewHeight > 0) {
                         // Fallback absolute mode: confirm tap-and-drag once moved beyond deadzone
@@ -654,7 +674,7 @@ class TouchMouseHandler(
                 mouseSubPixelAccumulation
             )
             if (dx.toInt() != 0 || dy.toInt() != 0) {
-                listener.onMouseMoveRelative(dx, dy)
+                dispatchRelativeMouseMove(dx, dy, viewWidth, viewHeight)
             }
         } else if (!isRelativeSource &&
             (event.actionMasked == MotionEvent.ACTION_HOVER_MOVE ||

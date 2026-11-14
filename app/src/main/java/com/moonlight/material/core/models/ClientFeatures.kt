@@ -47,5 +47,7 @@ data class ClientFeatures(
     val gamepadMotionFallbackToDevice: Boolean = false,
     val showToggleControllerButton: Boolean = true,
     val customResolutions: List<String> = emptyList(),
-    val enableLatencyToast: Boolean = false
+    val enableLatencyToast: Boolean = false,
+    val absoluteMouseMode: Boolean = false,
+    val mouseNavButtons: Boolean = true
 )

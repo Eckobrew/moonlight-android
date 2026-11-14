@@ -235,6 +235,7 @@ class GamepadHandler(
     private var scrollAccumY = 0f
     private var startDownTime = 0L
     private var selectDownTime = 0L
+    private var startHoldConsumed = false
     private var selectHoldConsumed = false
     private var emulatingButtonFlags = 0
     private var pendingExit = false
@@ -259,17 +260,20 @@ class GamepadHandler(
     private var rightStickX: Short = 0
     private var rightStickY: Short = 0
 
-    // Holding Start for 750ms toggles mouse emulation (matches user's MouseEmulationHandler)
+    // Holding Start for 3 seconds toggles mouse emulation without leaving Start stuck down on host
     private val startHoldRunnable = Runnable {
         if (!gamepadMouseEnabled) return@Runnable
+        startHoldConsumed = true
         toggleMouseEmulation()
     }
 
-    // Holding Select opens the session controls menu without leaking Select held forever
+    // Holding Select/Back for 3 seconds opens the session controls menu without leaving Back stuck down on host
     private val backHoldRunnable = Runnable {
         selectHoldConsumed = true
         buttonFlags = buttonFlags and ControllerButtonFlags.BACK.inv()
-        notifyState()
+        if (!isMouseEmulationMode) {
+            notifyState()
+        }
         listener.onGamepadMenuRequested()
     }
 
@@ -621,18 +625,24 @@ class GamepadHandler(
             hasMode = true
         }
 
-        // Check for hold-Start (750ms) to toggle mouse emulation
+        // Check for hold-Start (3000ms) to toggle mouse emulation
         if (normalizedKey == KeyEvent.KEYCODE_BUTTON_START && gamepadMouseEnabled) {
             if (isDown && repeatCount == 0) {
+                startHoldConsumed = false
                 startDownTime = System.currentTimeMillis()
                 handler?.removeCallbacks(startHoldRunnable)
                 handler?.postDelayed(startHoldRunnable, START_HOLD_MOUSE_MODE_MS)
             } else if (!isDown) {
                 handler?.removeCallbacks(startHoldRunnable)
+                if (startHoldConsumed) {
+                    startHoldConsumed = false
+                    buttonFlags = buttonFlags and ControllerButtonFlags.START.inv()
+                    return true
+                }
             }
         }
 
-        // Check for hold-Select to open stream menu
+        // Check for hold-Select (3000ms) to open stream menu
         if (normalizedKey == KeyEvent.KEYCODE_BUTTON_SELECT) {
             if (isDown && repeatCount == 0) {
                 selectHoldConsumed = false
@@ -643,6 +653,7 @@ class GamepadHandler(
                 handler?.removeCallbacks(backHoldRunnable)
                 if (selectHoldConsumed) {
                     selectHoldConsumed = false
+                    buttonFlags = buttonFlags and ControllerButtonFlags.BACK.inv()
                     return true
                 }
             }
