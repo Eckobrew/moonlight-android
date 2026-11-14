@@ -322,7 +322,9 @@ class StreamSessionController(
 
     var keyboardOverlayActive: Boolean = false
     val localInputActive: Boolean
-        get() = keyboardOverlayActive || _showSessionControls.value || _currentStageName.value != "Connected"
+        get() = _showSessionControls.value || _currentStageName.value != "Connected"
+
+    private var trackedModifierFlags: Int = 0
 
     fun openSessionControls() {
         if (_isStreaming.value) {
@@ -383,6 +385,9 @@ class StreamSessionController(
 
     fun updateAppFocus(focused: Boolean) {
         hasAppFocus = focused
+        if (!focused) {
+            trackedModifierFlags = 0
+        }
         if (!focused && currentSettings?.features?.backgroundGamepad != true) {
             controllers.values.forEach {
                 it.handler.reset(keepMouseMode = true)
@@ -818,9 +823,8 @@ class StreamSessionController(
 
     fun sendHostKeyPress(vk: Short, extended: Boolean = false) {
         val wireCode = (vk.toInt() or 0x8000).toShort()
-        val flags: Byte = if (extended) KeycodeMappings.MODIFIER_EXTENDED else 0
-        sendKeyboardEvent(wireCode, true, 0, flags)
-        sendKeyboardEvent(wireCode, false, 0, flags)
+        sendKeyboardEvent(wireCode, true, 0, 0)
+        sendKeyboardEvent(wireCode, false, 0, 0)
     }
 
     fun sendKeyboardEvent(keyCode: Short, isDown: Boolean, modifiers: Byte = 0, flags: Byte = 0) {
@@ -834,9 +838,12 @@ class StreamSessionController(
         if (!_isStreaming.value || localInputActive || !_inputCaptured.value) return false
         val isDown = event.action == KeyEvent.ACTION_DOWN
         if (!isDown && event.action != KeyEvent.ACTION_UP) return false
+
+        val swapWinAlt = currentSettings?.swapWinAltKeys ?: false
         val hostKey = KeycodeMappings.hostKey(
             androidKeyCode = event.keyCode,
-            swapWinAltKeys = currentSettings?.swapWinAltKeys ?: false
+            swapWinAltKeys = swapWinAlt,
+            deviceId = event.deviceId
         )
         if (hostKey == null) {
             val character = event.unicodeChar
@@ -847,7 +854,29 @@ class StreamSessionController(
             return true
         }
 
-        val modifiers = KeycodeMappings.extractModifiers(event, hostKey.extended)
+        // Ignore key-repeat down events for translated keys; host OS handles auto-repeat natively
+        if (isDown && event.repeatCount > 0) {
+            return true
+        }
+
+        val modBit = when (hostKey.virtualKey) {
+            KeycodeMappings.VK_LSHIFT, KeycodeMappings.VK_RSHIFT -> KeycodeMappings.MODIFIER_SHIFT.toInt()
+            KeycodeMappings.VK_LCONTROL, KeycodeMappings.VK_RCONTROL -> KeycodeMappings.MODIFIER_CTRL.toInt()
+            KeycodeMappings.VK_LMENU, KeycodeMappings.VK_RMENU -> KeycodeMappings.MODIFIER_ALT.toInt()
+            KeycodeMappings.VK_LWIN, KeycodeMappings.VK_RWIN -> KeycodeMappings.MODIFIER_META.toInt()
+            else -> 0
+        }
+        if (modBit != 0) {
+            trackedModifierFlags = if (isDown) trackedModifierFlags or modBit else trackedModifierFlags and modBit.inv()
+        }
+
+        val modifiers = KeycodeMappings.extractModifiers(
+            event = event,
+            extended = hostKey.extended,
+            swapWinAltKeys = swapWinAlt,
+            trackedModifiers = trackedModifierFlags,
+            impliedModifiers = hostKey.impliedModifiers
+        )
         val keyAction = if (isDown) KeycodeMappings.KEY_ACTION_DOWN else KeycodeMappings.KEY_ACTION_UP
         return try {
             MoonBridge.sendKeyboardInput(hostKey.wireCode, keyAction, modifiers, hostKey.flags)
@@ -1201,16 +1230,19 @@ class StreamSessionController(
 
     override fun onNativePen(
         type: Byte, tool: Byte, buttons: Byte, x: Float, y: Float, pressure: Float,
-        major: Float, minor: Float, tilt: Byte
+        major: Float, minor: Float, rotation: Short, tilt: Byte
     ): Int {
         if (!_isStreaming.value || _currentStageName.value != "Connected") return -5501
-        return MoonBridge.sendPenEvent(type, tool, buttons, x, y, pressure, major, minor, (-1).toShort(), tilt)
+        return MoonBridge.sendPenEvent(type, tool, buttons, x, y, pressure, major, minor, rotation, tilt)
     }
 
-    override fun onNativeTouch(eventType: Byte, pointerId: Int, x: Float, y: Float, pressure: Float, major: Float, minor: Float): Int {
+    override fun onNativeTouch(
+        eventType: Byte, pointerId: Int, x: Float, y: Float, pressure: Float,
+        major: Float, minor: Float, rotation: Short
+    ): Int {
         if (!_isStreaming.value || _currentStageName.value != "Connected") return 0
         return try {
-            val result = MoonBridge.sendTouchEvent(eventType, pointerId, x, y, pressure, major, minor, (-1).toShort())
+            val result = MoonBridge.sendTouchEvent(eventType, pointerId, x, y, pressure, major, minor, rotation)
             if (eventType.toInt() == 1) {
                 AppLogger.debug("Native touch down: result=$result, hostFeatures=${MoonBridge.getHostFeatureFlags()}", "INPUT")
             }

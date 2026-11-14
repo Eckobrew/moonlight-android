@@ -50,6 +50,10 @@ class RemoteKeyboardInputView(
         contentDescription = "Remote keyboard input"
     }
     override fun onCheckIsTextEditor() = true
+    override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) return false
+        return handleKey(event) || super.onKeyPreIme(keyCode, event)
+    }
     override fun onKeyDown(keyCode: Int, event: KeyEvent) = handleKey(event) || super.onKeyDown(keyCode, event)
     override fun onKeyUp(keyCode: Int, event: KeyEvent) = handleKey(event) || super.onKeyUp(keyCode, event)
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {

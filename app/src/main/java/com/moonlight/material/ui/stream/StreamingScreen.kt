@@ -78,7 +78,13 @@ fun StreamingScreen(
         val manager = context.getSystemService(Context.INPUT_SERVICE) as InputManager
         fun refreshDevices() {
             val inputDevices = manager.inputDeviceIds.map { manager.getInputDevice(it) }.filterNotNull()
-            physicalMouseConnected = inputDevices.any { !it.isVirtual && it.supportsSource(InputDevice.SOURCE_MOUSE) }
+            physicalMouseConnected = inputDevices.any { dev ->
+                !dev.isVirtual &&
+                    (!dev.supportsSource(InputDevice.SOURCE_TOUCHSCREEN) || Build.HARDWARE == "cheets") &&
+                    (dev.supportsSource(InputDevice.SOURCE_MOUSE) ||
+                        dev.supportsSource(InputDevice.SOURCE_MOUSE_RELATIVE) ||
+                        (dev.supportsSource(InputDevice.SOURCE_TOUCHPAD) && !GamepadHandler.isGamepad(dev)))
+            }
             val devices = inputDevices.filter(GamepadHandler::isGamepad)
             physicalControllerConnected = devices.isNotEmpty()
             session.updatePhysicalControllers(devices)
@@ -147,6 +153,15 @@ fun StreamingScreen(
                     }
                 }.apply {
                     isFocusableInTouchMode = true
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        requestUnbufferedDispatch(
+                            InputDevice.SOURCE_CLASS_BUTTON or
+                                InputDevice.SOURCE_CLASS_JOYSTICK or
+                                InputDevice.SOURCE_CLASS_POINTER or
+                                InputDevice.SOURCE_CLASS_POSITION or
+                                InputDevice.SOURCE_CLASS_TRACKBALL
+                        )
+                    }
                     setOnCapturedPointerListener { view, event ->
                         session.inputCaptured.value && !session.localInputActive && session.touchMouseHandler.handleGenericMotion(event, view.width, view.height)
                     }
@@ -194,6 +209,13 @@ fun StreamingScreen(
                 }
             },
             update = { view ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    view.pointerIcon = if (inputCaptured && stageName == "Connected" && !showControlsSheet) {
+                        android.view.PointerIcon.getSystemIcon(view.context, android.view.PointerIcon.TYPE_NULL)
+                    } else {
+                        null
+                    }
+                }
                 if (captureMouse) {
                     view.requestFocus()
                     if (view.hasWindowFocus() && !view.hasPointerCapture()) view.requestPointerCapture()
@@ -202,26 +224,39 @@ fun StreamingScreen(
                     session.touchMouseHandler.releasePhysicalMouse()
                 }
             },
-            modifier = Modifier.align(Alignment.Center).then(videoSize)
+            modifier = Modifier.align(Alignment.Center)
+                .then(videoSize)
+                .onSizeChanged { touchAreaSize = it }
         )
 
-        // Compose owns the gesture hit target. SurfaceView touch interop may not
-        // receive events when Compose overlays are present, even with no gamepad.
-        Box(Modifier.align(Alignment.Center).then(videoSize)
-            .onSizeChanged { touchAreaSize = it }
-            .pointerInteropFilter { event ->
-                if (session.showSessionControls.value) return@pointerInteropFilter true
-                if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
-                    com.moonlight.material.core.utils.AppLogger.debug(
-                        "Stream touch down, source=${event.source}, touchpad=${session.touchMouseHandler.isDesktopMouseMode}", "INPUT")
+        // Compose owns the full-screen gesture hit target (so relative touchpad mode works on black bars too,
+        // while absolute/native touch maps coordinates relative to the centered video viewport).
+        var fullScreenSize by remember { mutableStateOf(IntSize.Zero) }
+        Box(
+            Modifier.fillMaxSize()
+                .onSizeChanged { fullScreenSize = it }
+                .pointerInteropFilter { event ->
+                    if (session.showSessionControls.value) return@pointerInteropFilter true
+                    val vW = touchAreaSize.width.takeIf { it > 0 } ?: fullScreenSize.width
+                    val vH = touchAreaSize.height.takeIf { it > 0 } ?: fullScreenSize.height
+                    val offsetX = -((fullScreenSize.width - vW) / 2f).coerceAtLeast(0f)
+                    val offsetY = -((fullScreenSize.height - vH) / 2f).coerceAtLeast(0f)
+                    if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                        com.moonlight.material.core.utils.AppLogger.debug(
+                            "Stream touch down, source=${event.source}, touchpad=${session.touchMouseHandler.isDesktopMouseMode}", "INPUT"
+                        )
+                    }
+                    if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+                        event.offsetLocation(offsetX, offsetY)
+                        val handled = session.inputCaptured.value && !session.localInputActive &&
+                            session.touchMouseHandler.handleGenericMotion(event, vW, vH)
+                        event.offsetLocation(-offsetX, -offsetY)
+                        handled
+                    } else {
+                        session.touchMouseHandler.handleTouchEvent(event, vW, vH, offsetX, offsetY)
+                    }
                 }
-                if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
-                    session.inputCaptured.value && !session.localInputActive &&
-                        session.touchMouseHandler.handleGenericMotion(event, touchAreaSize.width, touchAreaSize.height)
-                } else {
-                    session.touchMouseHandler.handleTouchEvent(event, touchAreaSize.width, touchAreaSize.height)
-                }
-            })
+        )
 
         // Connecting indicator
         if (stageName != "Connected" && sessionError == null) {

@@ -78,6 +78,19 @@ class KeyboardProtocolTest {
         val swappedAlt = KeycodeMappings.hostKey(KeyEvent.KEYCODE_ALT_LEFT, swapWinAltKeys = true)
         assertEquals(KeycodeMappings.VK_LWIN, swappedAlt?.virtualKey)
 
+        val swappedMetaLeft = KeycodeMappings.hostKey(KeyEvent.KEYCODE_META_LEFT, swapWinAltKeys = true)
+        assertEquals(KeycodeMappings.VK_LMENU, swappedMetaLeft?.virtualKey)
+        assertFalse(swappedMetaLeft!!.extended)
+
+        // KEYCODE_PLUS implies MODIFIER_SHIFT
+        val plusKey = KeycodeMappings.hostKey(KeyEvent.KEYCODE_PLUS)
+        assertEquals(0xBB.toShort(), plusKey?.virtualKey)
+        assertEquals(KeycodeMappings.MODIFIER_SHIFT, plusKey?.impliedModifiers)
+
+        // F13 - F24
+        assertEquals(0x7C.toShort(), KeycodeMappings.hostKey(320)?.virtualKey)
+        assertEquals(0x87.toShort(), KeycodeMappings.hostKey(331)?.virtualKey)
+
         // Arrows are extended
         assertTrue(KeycodeMappings.hostKey(KeyEvent.KEYCODE_DPAD_LEFT)?.extended == true)
         assertTrue(KeycodeMappings.hostKey(KeyEvent.KEYCODE_DPAD_RIGHT)?.extended == true)
