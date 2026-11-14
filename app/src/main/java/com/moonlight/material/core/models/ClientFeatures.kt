@@ -40,5 +40,10 @@ data class ClientFeatures(
     val touchOverlayOpacity: Float = 0.65f,
     val touchHapticsEnabled: Boolean = true,
     val stretchToFit: Boolean = false,
-    val gamepadScrollStick: GamepadScrollStick = GamepadScrollStick.RIGHT
+    val gamepadScrollStick: GamepadScrollStick = GamepadScrollStick.RIGHT,
+    val gamepadMouseSensitivity: Int = 100,
+    val stickDeadzonePercent: Int = 7,
+    val vibrateFallbackToDevice: Boolean = true,
+    val gamepadMotionFallbackToDevice: Boolean = false,
+    val showToggleControllerButton: Boolean = true
 )

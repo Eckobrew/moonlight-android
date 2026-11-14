@@ -2,9 +2,14 @@ package com.moonlight.material.core.state
 
 import android.content.Context
 import com.moonlight.material.core.utils.ClipboardSyncManager
+import android.os.BatteryManager
 import android.os.Build
+import android.os.CombinedVibration
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.os.VibratorManager
+import android.widget.Toast
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -120,18 +125,41 @@ class StreamSessionController(
     private var hasAppFocus = true
     var displayRefreshRate: () -> Float = { 60f }
     var displaySupportsHdr10: () -> Boolean = { true }
+    var displayRotation: () -> Int = { Surface.ROTATION_90 }
+
     private inner class Controller(val slot: Int, var device: InputDevice) {
-        val handler = GamepadHandler(this@StreamSessionController, controllerNumber = slot.toShort())
+        val handler = GamepadHandler(
+            listener = this@StreamSessionController,
+            controllerNumber = slot.toShort(),
+            device = device
+        )
         var state: ControllerState? = null
         val sensors = mutableMapOf<Byte, Pair<SensorManager, SensorEventListener>>()
         var lights: LightsManager.LightsSession? = null
+        var lowFreqMotor: Short = 0
+        var highFreqMotor: Short = 0
+        var leftTriggerMotor: Short = 0
+        var rightTriggerMotor: Short = 0
+        var lastBatteryStatus: Byte = -1
+        var lastBatteryCapacity: Byte = -1
 
         fun stopFeedback() {
-            sensors.values.forEach { (manager, listener) -> manager.unregisterListener(listener) }
-            sensors.clear()
-            if (Build.VERSION.SDK_INT >= 31) lights?.close()
+            sensors.keys.toList().forEach { motionType ->
+                sensors.remove(motionType)?.let { (manager, listener) ->
+                    manager.unregisterListener(listener)
+                }
+                if (motionType == MoonBridge.LI_MOTION_TYPE_GYRO) {
+                    try {
+                        MoonBridge.sendControllerMotionEvent(slot.toByte(), MoonBridge.LI_MOTION_TYPE_GYRO, 0f, 0f, 0f)
+                    } catch (_: Throwable) {}
+                }
+            }
+            if (Build.VERSION.SDK_INT >= 31) {
+                try { lights?.close() } catch (_: Throwable) {}
+                try { device.vibratorManager.cancel() } catch (_: Throwable) {}
+            }
             lights = null
-            controllerVibrator(device).cancel()
+            try { controllerVibrator(device).cancel() } catch (_: Throwable) {}
         }
     }
 
@@ -176,8 +204,23 @@ class StreamSessionController(
 
     fun controllerHandler(deviceId: Int, device: InputDevice?, refresh: Boolean = true): GamepadHandler? {
         controllers[deviceId]?.let {
-            if (device != null) it.device = device
+            if (device != null && it.device !== device) {
+                it.device = device
+                it.handler.configureForDevice(device)
+            }
             return it.handler
+        }
+        // Check if this is an associated DualShock/DualSense standalone touchpad InputDevice
+        if (device != null && !GamepadHandler.isGamepad(device) &&
+            (device.sources and InputDevice.SOURCE_TOUCHPAD) == InputDevice.SOURCE_TOUCHPAD
+        ) {
+            val associated = controllers.values.firstOrNull {
+                it.device.descriptor == device.descriptor ||
+                    (it.device.vendorId == device.vendorId && it.device.productId == device.productId)
+            }
+            if (associated != null) {
+                return associated.handler
+            }
         }
         if (device == null || !GamepadHandler.isGamepad(device)) return null
         val occupied = controllerMask()
@@ -190,6 +233,8 @@ class StreamSessionController(
             controller.handler.swapFaceButtons = it.swapFaceButtons
             controller.handler.gamepadMouseEnabled = it.gamepadMouse
             controller.handler.scrollStick = it.gamepadScrollStick
+            controller.handler.mouseEmulationSensitivity = it.gamepadMouseSensitivity
+            controller.handler.stickDeadzonePercent = it.stickDeadzonePercent
         }
         if (refresh && _currentStageName.value == "Connected") refreshControllerRegistration()
         return controller.handler
@@ -221,21 +266,90 @@ class StreamSessionController(
             val bit = 1 shl controller.slot
             if (registeredControllers and bit != 0) continue
             val device = controller.device
-            val type = MoonBridge.guessControllerType(device.vendorId, device.productId)
-            var capabilities = if (controllerVibrator(device).hasVibrator()) 3 else 1
-            if (Build.VERSION.SDK_INT >= 31) {
-                if (device.sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null) capabilities = capabilities or 0x10
-                if (device.sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null) capabilities = capabilities or 0x20
+            val rawType: Byte = when (device.vendorId) {
+                0x045e -> MoonBridge.LI_CTYPE_XBOX
+                0x054c -> MoonBridge.LI_CTYPE_PS
+                0x057e -> MoonBridge.LI_CTYPE_NINTENDO
+                else -> MoonBridge.guessControllerType(device.vendorId, device.productId)
             }
-            if (Build.VERSION.SDK_INT >= 34 && device.lightsManager.lights.any { it.hasRgbControl() }) {
-                capabilities = capabilities or 0x80
+
+            var supportedButtons = ControllerButtonFlags.STANDARD_BUTTONS
+            if (controller.handler.hasPaddles) {
+                supportedButtons = supportedButtons or
+                    ControllerButtonFlags.PADDLE1 or
+                    ControllerButtonFlags.PADDLE2 or
+                    ControllerButtonFlags.PADDLE3 or
+                    ControllerButtonFlags.PADDLE4
             }
+            if (controller.handler.hasShare) {
+                supportedButtons = supportedButtons or ControllerButtonFlags.MISC
+            }
+
+            var capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS.toInt()
+            if (controllerVibrator(device).hasVibrator() || currentSettings?.features?.vibrateFallbackToDevice == true) {
+                capabilities = capabilities or MoonBridge.LI_CCAP_RUMBLE.toInt()
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (hasQuadAmplitudeRumble(device)) {
+                    capabilities = capabilities or MoonBridge.LI_CCAP_RUMBLE.toInt() or MoonBridge.LI_CCAP_TRIGGER_RUMBLE.toInt()
+                }
+                if (device.isExternal) {
+                    capabilities = capabilities or MoonBridge.LI_CCAP_BATTERY_STATE.toInt()
+                }
+                // Guard against Android 12 (API 31) InputDeviceSensorManager NPE on non-Sony/Nintendo controllers
+                val canQueryDeviceSensor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ||
+                    device.vendorId == 0x054c || device.vendorId == 0x057e
+                val devSensorMgr = if (canQueryDeviceSensor) try { device.sensorManager } catch (_: Throwable) { null } else null
+                val fallbackSensorMgr = if (controller.slot == 0 && currentSettings?.features?.gamepadMotionFallbackToDevice == true) {
+                    applicationContext?.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+                } else null
+                val effectiveSensorMgr = if (devSensorMgr?.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null ||
+                    devSensorMgr?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null
+                ) devSensorMgr else fallbackSensorMgr
+
+                if (effectiveSensorMgr?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null) {
+                    capabilities = capabilities or MoonBridge.LI_CCAP_ACCEL.toInt()
+                }
+                if (effectiveSensorMgr?.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null) {
+                    capabilities = capabilities or MoonBridge.LI_CCAP_GYRO.toInt()
+                }
+
+                // Sony DualShock 4 / DualSense RGB LEDs work on Android 12+ (API 31+) even when hasRgbControl() returns false on API 31-33
+                val hasRgb = try {
+                    device.lightsManager.lights.any {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) it.hasRgbControl()
+                        else device.vendorId == 0x054c || it.hasRgbControl()
+                    }
+                } catch (_: Throwable) { false }
+                if (hasRgb) {
+                    capabilities = capabilities or MoonBridge.LI_CCAP_RGB_LED.toInt()
+                }
+            }
+            if ((device.sources and InputDevice.SOURCE_TOUCHPAD) == InputDevice.SOURCE_TOUCHPAD) {
+                capabilities = capabilities or MoonBridge.LI_CCAP_TOUCHPAD.toInt()
+                supportedButtons = supportedButtons or ControllerButtonFlags.TOUCHPAD
+            }
+
+            // Override type to LI_CTYPE_UNKNOWN if emulating motion sensors on a non-PS controller so Sunshine exposes gyro/accel
+            val hasMotionCap = (capabilities and (MoonBridge.LI_CCAP_ACCEL.toInt() or MoonBridge.LI_CCAP_GYRO.toInt())) != 0
+            val reportedType = if (rawType != MoonBridge.LI_CTYPE_PS && hasMotionCap) {
+                controller.handler.needsClickpadEmulation = true
+                MoonBridge.LI_CTYPE_UNKNOWN
+            } else {
+                rawType
+            }
+
             val next = registeredControllers or bit
             val result = MoonBridge.sendControllerArrivalEvent(
-                controller.slot.toByte(), (next or keepSlot).toShort(), type, ControllerButtonFlags.STANDARD_BUTTONS, capabilities.toShort()
+                controller.slot.toByte(),
+                (next or keepSlot).toShort(),
+                reportedType,
+                supportedButtons,
+                capabilities.toShort()
             )
             if (!checkControllerResult("register", result)) return false
             registeredControllers = next
+            reportControllerBattery(controller)
         }
         return true
     }
@@ -253,6 +367,49 @@ class StreamSessionController(
         }
         lastControllerError = result.takeIf { it != 0 }
         return result == 0
+    }
+
+    private fun hasDualAmplitudeRumble(device: InputDevice): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        val ids = device.vibratorManager.vibratorIds
+        if (ids.size != 2) return false
+        return ids.all { id -> device.vibratorManager.getVibrator(id).hasAmplitudeControl() }
+    }
+
+    private fun hasQuadAmplitudeRumble(device: InputDevice): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        val ids = device.vibratorManager.vibratorIds
+        if (ids.size != 4) return false
+        return ids.all { id -> device.vibratorManager.getVibrator(id).hasAmplitudeControl() }
+    }
+
+    private fun reportControllerBattery(controller: Controller) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val device = controller.device
+        if (!device.isExternal) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val battery = device.batteryState
+                if (!battery.isPresent) return@launch
+                val status: Byte = when (battery.status) {
+                    BatteryManager.BATTERY_STATUS_CHARGING -> MoonBridge.LI_BATTERY_STATE_CHARGING
+                    BatteryManager.BATTERY_STATUS_DISCHARGING -> MoonBridge.LI_BATTERY_STATE_DISCHARGING
+                    BatteryManager.BATTERY_STATUS_NOT_CHARGING -> MoonBridge.LI_BATTERY_STATE_NOT_CHARGING
+                    BatteryManager.BATTERY_STATUS_FULL -> MoonBridge.LI_BATTERY_STATE_FULL
+                    else -> MoonBridge.LI_BATTERY_STATE_UNKNOWN
+                }
+                val capacity = if (battery.capacity.isNaN() || battery.capacity < 0f) {
+                    MoonBridge.LI_BATTERY_PERCENTAGE_UNKNOWN
+                } else {
+                    (battery.capacity * 100f).roundToInt().coerceIn(0, 100).toByte()
+                }
+                if (status != controller.lastBatteryStatus || capacity != controller.lastBatteryCapacity) {
+                    controller.lastBatteryStatus = status
+                    controller.lastBatteryCapacity = capacity
+                    MoonBridge.sendControllerBatteryEvent(controller.slot.toByte(), status, capacity)
+                }
+            } catch (_: Throwable) {}
+        }
     }
     val touchMouseHandler = TouchMouseHandler(this)
 
@@ -484,6 +641,8 @@ class StreamSessionController(
                     it.handler.swapFaceButtons = settings.features.swapFaceButtons
                     it.handler.gamepadMouseEnabled = settings.features.gamepadMouse
                     it.handler.scrollStick = settings.features.gamepadScrollStick
+                    it.handler.mouseEmulationSensitivity = settings.features.gamepadMouseSensitivity
+                    it.handler.stickDeadzonePercent = settings.features.stickDeadzonePercent
                 }
                 setTouchpadMode(settings.features.desktopMouse)
                 touchMouseHandler.mouseSensitivityX = settings.mouseSensitivityX * settings.mouseSensitivity
@@ -1007,73 +1166,254 @@ class StreamSessionController(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) device.vibratorManager.defaultVibrator
         else device.vibrator
 
+    @Suppress("DEPRECATION")
+    private fun deviceVibrator(): Vibrator? {
+        val ctx = applicationContext ?: return null
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+        } else {
+            ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+    }
+
+    private fun rumbleSingleVibrator(vibrator: Vibrator, lowFreqMotor: Short, highFreqMotor: Short) {
+        val low = lowFreqMotor.toInt() and 0xFFFF
+        val high = highFreqMotor.toInt() and 0xFFFF
+        if (low == 0 && high == 0) {
+            vibrator.cancel()
+            return
+        }
+        // Upstream weighting: 80% low frequency + 33% high frequency, clamped to [1..255]
+        val normalizedMagnitude = (((low * 0.80) + (high * 0.33)) * 255.0 / 65535.0)
+            .toInt()
+            .coerceIn(1, 255)
+
+        if (vibrator.hasAmplitudeControl()) {
+            vibrator.vibrate(VibrationEffect.createOneShot(60000L, normalizedMagnitude))
+        } else {
+            // PWM simulation for non-amplitude-controlled vibrators
+            val periodMs = 20L
+            val onTime = ((normalizedMagnitude / 255.0) * periodMs).toLong().coerceIn(1L, periodMs)
+            val offTime = (periodMs - onTime).coerceAtLeast(0L)
+            vibrator.vibrate(
+                VibrationEffect.createWaveform(
+                    longArrayOf(0L, onTime, offTime),
+                    intArrayOf(0, VibrationEffect.DEFAULT_AMPLITUDE, 0),
+                    0
+                )
+            )
+        }
+    }
+
+    private fun rumbleMultiVibrators(
+        vibratorManager: VibratorManager,
+        lowFreqMotor: Short,
+        highFreqMotor: Short,
+        leftTrigger: Short,
+        rightTrigger: Short
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val low = lowFreqMotor.toInt() and 0xFFFF
+        val high = highFreqMotor.toInt() and 0xFFFF
+        val lt = leftTrigger.toInt() and 0xFFFF
+        val rt = rightTrigger.toInt() and 0xFFFF
+
+        if (low == 0 && high == 0 && lt == 0 && rt == 0) {
+            vibratorManager.cancel()
+            return
+        }
+
+        val vibratorIds = vibratorManager.vibratorIds
+        val motorValues = intArrayOf(low, high, lt, rt)
+        val combo = CombinedVibration.startParallel()
+        var addedAny = false
+        val count = minOf(vibratorIds.size, 4)
+        for (i in 0 until count) {
+            val amp = ((motorValues[i] * 255) / 65535).coerceIn(0, 255)
+            if (amp > 0) {
+                combo.addVibrator(vibratorIds[i], VibrationEffect.createOneShot(60000L, amp))
+                addedAny = true
+            }
+        }
+        if (!addedAny) {
+            vibratorManager.cancel()
+            return
+        }
+        val attrs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            VibrationAttributes.Builder().setUsage(VibrationAttributes.USAGE_MEDIA).build()
+        } else null
+
+        if (attrs != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            vibratorManager.vibrate(combo.combine(), attrs)
+        } else {
+            vibratorManager.vibrate(combo.combine())
+        }
+    }
+
     override fun onRumble(controllerNumber: Short, lowFreqMotor: Short, highFreqMotor: Short) {
         dispatchNativeEvent {
-            val device = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }?.device
-                ?: return@dispatchNativeEvent
-            val vibrator = controllerVibrator(device)
-            if (!vibrator.hasVibrator()) return@dispatchNativeEvent
-
-            val strength = maxOf(lowFreqMotor.toInt() and 0xFFFF, highFreqMotor.toInt() and 0xFFFF)
-            if (strength == 0) {
-                vibrator.cancel()
-            } else {
-                val amplitude = if (vibrator.hasAmplitudeControl()) (strength * 255 / 65535).coerceAtLeast(1)
-                    else VibrationEffect.DEFAULT_AMPLITUDE
-                vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000), intArrayOf(0, amplitude), 0))
+            val controller = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }
+            if (controller != null) {
+                controller.lowFreqMotor = lowFreqMotor
+                controller.highFreqMotor = highFreqMotor
+                reportControllerBattery(controller)
+                val device = controller.device
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    (hasDualAmplitudeRumble(device) || hasQuadAmplitudeRumble(device))
+                ) {
+                    rumbleMultiVibrators(
+                        device.vibratorManager,
+                        controller.lowFreqMotor,
+                        controller.highFreqMotor,
+                        controller.leftTriggerMotor,
+                        controller.rightTriggerMotor
+                    )
+                    return@dispatchNativeEvent
+                }
+                val vibrator = controllerVibrator(device)
+                if (vibrator.hasVibrator()) {
+                    rumbleSingleVibrator(vibrator, lowFreqMotor, highFreqMotor)
+                    return@dispatchNativeEvent
+                }
+            }
+            // Fallback to phone/tablet vibrator for Player 1 when enabled or when virtual on-screen controller is active
+            val shouldFallback = controllerNumber.toInt() == 0 && (
+                (controller != null && currentSettings?.features?.vibrateFallbackToDevice == true) ||
+                (controller == null && currentSettings?.features?.touchOverlayEnabled == true &&
+                    currentSettings?.features?.touchHapticsEnabled == true)
+            )
+            if (shouldFallback) {
+                val fallback = deviceVibrator()
+                if (fallback != null && fallback.hasVibrator()) {
+                    rumbleSingleVibrator(fallback, lowFreqMotor, highFreqMotor)
+                }
             }
         }
     }
 
     override fun onRumbleTriggers(controllerNumber: Short, leftTrigger: Short, rightTrigger: Short) {
-        // Dedicated trigger motors are not exposed by the generic Android vibrator.
-    }
-
-    override fun onSetMotionEventState(controllerNumber: Short, motionType: Byte, reportRateHz: Short) {
-        if (Build.VERSION.SDK_INT < 31) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         dispatchNativeEvent {
             val controller = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }
                 ?: return@dispatchNativeEvent
-            controller.sensors.remove(motionType)?.let { (manager, listener) -> manager.unregisterListener(listener) }
+            controller.leftTriggerMotor = leftTrigger
+            controller.rightTriggerMotor = rightTrigger
+            if (hasQuadAmplitudeRumble(controller.device)) {
+                rumbleMultiVibrators(
+                    controller.device.vibratorManager,
+                    controller.lowFreqMotor,
+                    controller.highFreqMotor,
+                    controller.leftTriggerMotor,
+                    controller.rightTriggerMotor
+                )
+            }
+        }
+    }
+
+    override fun onSetMotionEventState(controllerNumber: Short, motionType: Byte, reportRateHz: Short) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        dispatchNativeEvent {
+            val controller = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }
+                ?: return@dispatchNativeEvent
+            controller.sensors.remove(motionType)?.let { (manager, listener) ->
+                try { manager.unregisterListener(listener) } catch (_: Throwable) {}
+            }
             val rate = reportRateHz.toInt() and 0xFFFF
             if (rate == 0) return@dispatchNativeEvent
             val type = when (motionType.toInt()) {
-                1 -> Sensor.TYPE_ACCELEROMETER
-                2 -> Sensor.TYPE_GYROSCOPE
+                MoonBridge.LI_MOTION_TYPE_ACCEL.toInt() -> Sensor.TYPE_ACCELEROMETER
+                MoonBridge.LI_MOTION_TYPE_GYRO.toInt() -> Sensor.TYPE_GYROSCOPE
                 else -> return@dispatchNativeEvent
             }
-            val manager = controller.device.sensorManager
-            val sensor = manager.getDefaultSensor(type) ?: return@dispatchNativeEvent
+
+            val device = controller.device
+            val canQueryDeviceSensor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ||
+                device.vendorId == 0x054c || device.vendorId == 0x057e
+            val devSensorMgr = if (canQueryDeviceSensor) try { device.sensorManager } catch (_: Throwable) { null } else null
+            val devSensor = devSensorMgr?.getDefaultSensor(type)
+
+            val fallbackSensorMgr = if (devSensor == null && controller.slot == 0 &&
+                currentSettings?.features?.gamepadMotionFallbackToDevice == true
+            ) {
+                applicationContext?.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+            } else null
+
+            val manager = if (devSensor != null) devSensorMgr!! else (fallbackSensorMgr ?: return@dispatchNativeEvent)
+            val sensor = devSensor ?: manager.getDefaultSensor(type) ?: return@dispatchNativeEvent
+            val isDeviceFallbackSensor = (devSensor == null)
+
+            val lastValues = FloatArray(3) { Float.NaN }
             val listener = object : SensorEventListener {
                 override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
                 override fun onSensorChanged(event: SensorEvent) {
                     if (controller.sensors[motionType]?.second !== this || !canForwardGamepadInput) return
+                    var x = event.values[0]
+                    var y = event.values[1]
+                    var z = event.values[2]
+
+                    if (isDeviceFallbackSensor) {
+                        // Remap internal phone/tablet sensor axes from portrait display orientation to current landscape/reverse-landscape orientation
+                        when (displayRotation()) {
+                            Surface.ROTATION_0 -> {
+                                val nx = -x; val ny = z; val nz = y
+                                x = nx; y = ny; z = nz
+                            }
+                            Surface.ROTATION_90 -> {
+                                val nx = y; val ny = z; val nz = x
+                                x = nx; y = ny; z = nz
+                            }
+                            Surface.ROTATION_180 -> {
+                                val nx = x; val ny = z; val nz = -y
+                                x = nx; y = ny; z = nz
+                            }
+                            Surface.ROTATION_270 -> {
+                                val nx = -y; val ny = z; val nz = -x
+                                x = nx; y = ny; z = nz
+                            }
+                        }
+                    }
+
+                    if (x == lastValues[0] && y == lastValues[1] && z == lastValues[2]) return
+                    lastValues[0] = x
+                    lastValues[1] = y
+                    lastValues[2] = z
+
                     val scale = if (type == Sensor.TYPE_GYROSCOPE) (180.0 / Math.PI).toFloat() else 1f
                     MoonBridge.sendControllerMotionEvent(
-                        controllerNumber.toByte(), motionType,
-                        event.values[0] * scale, event.values[1] * scale, event.values[2] * scale
+                        controllerNumber.toByte(),
+                        motionType,
+                        x * scale,
+                        y * scale,
+                        z * scale
                     )
                 }
             }
-            if (manager.registerListener(listener, sensor, 1_000_000 / rate.coerceAtMost(200))) {
+            if (manager.registerListener(listener, sensor, 1_000_000 / rate.coerceIn(1, 200))) {
                 controller.sensors[motionType] = manager to listener
             }
         }
     }
 
     override fun onSetControllerLED(controllerNumber: Short, r: Byte, g: Byte, b: Byte) {
-        if (Build.VERSION.SDK_INT < 34) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         dispatchNativeEvent {
             val controller = controllers.values.firstOrNull { it.slot == controllerNumber.toInt() }
                 ?: return@dispatchNativeEvent
-            val lights = controller.device.lightsManager
-            val rgb = lights.lights.filter { it.hasRgbControl() }
+            val lights = try { controller.device.lightsManager } catch (_: Throwable) { return@dispatchNativeEvent }
+            val rgb = lights.lights.filter {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) it.hasRgbControl()
+                else controller.device.vendorId == 0x054c || it.hasRgbControl()
+            }
             if (rgb.isEmpty()) return@dispatchNativeEvent
             try {
                 val session = controller.lights ?: lights.openSession().also { controller.lights = it }
-                val state = LightState.Builder()
-                    .setColor(android.graphics.Color.rgb(r.toInt() and 255, g.toInt() and 255, b.toInt() and 255))
-                    .build()
+                val color = android.graphics.Color.argb(255, r.toInt() and 255, g.toInt() and 255, b.toInt() and 255)
+                val state = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    LightState.Builder().setColor(color).build()
+                } else {
+                    @Suppress("DEPRECATION")
+                    LightState.Builder().setColor(color).build()
+                }
                 val request = LightsRequest.Builder()
                 rgb.forEach { request.addLight(it, state) }
                 session.requestLights(request.build())
@@ -1210,6 +1550,42 @@ class StreamSessionController(
         if (canForwardGamepadInput) openSessionControls()
     }
 
+    override fun onGamepadQuitRequested() {
+        if (canForwardGamepadInput) disconnectStream()
+    }
+
+    override fun onGamepadMouseModeToggled(enabled: Boolean) {
+        val ctx = applicationContext ?: return
+        scope.launch(Dispatchers.Main) {
+            Toast.makeText(
+                ctx,
+                if (enabled) "Mouse emulation is: ON" else "Mouse emulation is: OFF",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    override fun onControllerTouchpadEvent(
+        controllerNumber: Short,
+        eventType: Byte,
+        pointerId: Int,
+        x: Float,
+        y: Float,
+        pressure: Float
+    ) {
+        if (!_isStreaming.value || _currentStageName.value != "Connected" || controllerPermissionDenied) return
+        try {
+            MoonBridge.sendControllerTouchEvent(
+                controllerNumber.toByte(),
+                eventType,
+                pointerId,
+                x,
+                y,
+                pressure
+            )
+        } catch (_: Throwable) {}
+    }
+
     override fun onEmulatedMouseMove(deltaX: Short, deltaY: Short) {
         onMouseMoveRelative(deltaX, deltaY)
     }
@@ -1224,6 +1600,20 @@ class StreamSessionController(
 
     override fun onEmulatedMouseScroll(scroll: Short) {
         onMouseScroll(scroll)
+    }
+
+    override fun onEmulatedMouseDiscreteScroll(clicks: Byte) {
+        if (!_isStreaming.value) return
+        try {
+            MoonBridge.sendMouseHighResScroll((clicks * 120).toShort())
+        } catch (_: Throwable) {}
+    }
+
+    override fun onEmulatedMouseDiscreteHScroll(clicks: Byte) {
+        if (!_isStreaming.value) return
+        try {
+            MoonBridge.sendMouseHighResHScroll((clicks * 120).toShort())
+        } catch (_: Throwable) {}
     }
 
     // --- MouseEventListener ---

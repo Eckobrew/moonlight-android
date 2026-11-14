@@ -72,6 +72,12 @@ object MoonBridge {
     const val COLOR_RANGE_LIMITED = 0
     const val COLOR_RANGE_FULL = 1
 
+    // Controller types
+    const val LI_CTYPE_UNKNOWN: Byte = 0x00
+    const val LI_CTYPE_XBOX: Byte = 0x01
+    const val LI_CTYPE_PS: Byte = 0x02
+    const val LI_CTYPE_NINTENDO: Byte = 0x03
+
     // Controller capabilities
     const val LI_CCAP_ANALOG_TRIGGERS: Short = 0x01
     const val LI_CCAP_RUMBLE: Short = 0x02
@@ -81,6 +87,20 @@ object MoonBridge {
     const val LI_CCAP_GYRO: Short = 0x20
     const val LI_CCAP_BATTERY_STATE: Short = 0x40
     const val LI_CCAP_RGB_LED: Short = 0x80
+
+    // Motion sensor types
+    const val LI_MOTION_TYPE_ACCEL: Byte = 0x01
+    const val LI_MOTION_TYPE_GYRO: Byte = 0x02
+
+    // Touch event types
+    const val LI_TOUCH_EVENT_HOVER: Byte = 0x00
+    const val LI_TOUCH_EVENT_DOWN: Byte = 0x01
+    const val LI_TOUCH_EVENT_UP: Byte = 0x02
+    const val LI_TOUCH_EVENT_MOVE: Byte = 0x03
+    const val LI_TOUCH_EVENT_CANCEL: Byte = 0x04
+    const val LI_TOUCH_EVENT_BUTTON_ONLY: Byte = 0x05
+    const val LI_TOUCH_EVENT_HOVER_LEAVE: Byte = 0x06
+    const val LI_TOUCH_EVENT_CANCEL_ALL: Byte = 0x07
 
     // Battery states
     const val LI_BATTERY_STATE_UNKNOWN: Byte = 0

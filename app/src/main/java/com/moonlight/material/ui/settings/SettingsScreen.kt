@@ -405,20 +405,42 @@ private fun ControllerSettingsTab(settings: StreamSettings, onUpdate: (StreamSet
                 checked = settings.features.touchHapticsEnabled,
                 onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(touchHapticsEnabled = it))) }
             )
+
+            SettingToggle(
+                title = "Show On-Screen Toggle Pill",
+                subtitle = "Keep a quick Show/Hide button on screen during streaming",
+                checked = settings.features.showToggleControllerButton,
+                onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(showToggleControllerButton = it))) }
+            )
         }
     }
 
     Spacer(modifier = Modifier.height(16.dp))
 
     SectionCard(title = "Hardware Gamepad Options") {
+        Text("Analog Stick Deadzone: ${settings.features.stickDeadzonePercent}%", color = TextSecondary)
+        Slider(
+            value = settings.features.stickDeadzonePercent.toFloat(),
+            onValueChange = { onUpdate(settings.copy(features = settings.features.copy(stickDeadzonePercent = it.toInt()))) },
+            valueRange = 1f..30f,
+            steps = 28
+        )
+
         SettingToggle(
             title = "Controller Mouse Emulation",
-            subtitle = "Hold Start for 3 seconds to toggle pointer emulation",
+            subtitle = "Hold Start to toggle pointer emulation",
             checked = settings.features.gamepadMouse,
             onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(gamepadMouse = it))) }
         )
 
         if (settings.features.gamepadMouse) {
+            Text("Mouse Emulation Sensitivity: ${settings.features.gamepadMouseSensitivity}%", color = TextSecondary)
+            Slider(
+                value = settings.features.gamepadMouseSensitivity.toFloat(),
+                onValueChange = { onUpdate(settings.copy(features = settings.features.copy(gamepadMouseSensitivity = it.toInt()))) },
+                valueRange = 20f..300f
+            )
+
             Text("Controller Scroll Stick", color = TextSecondary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 com.moonlight.material.core.models.GamepadScrollStick.entries.forEach { stick ->
@@ -435,6 +457,20 @@ private fun ControllerSettingsTab(settings: StreamSettings, onUpdate: (StreamSet
             title = "Swap Face Buttons (Nintendo A/B X/Y)",
             checked = settings.features.swapFaceButtons,
             onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(swapFaceButtons = it))) }
+        )
+
+        SettingToggle(
+            title = "Emulate Rumble With Device Vibrator",
+            subtitle = "Use phone/tablet vibration when the controller lacks rumble motors",
+            checked = settings.features.vibrateFallbackToDevice,
+            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(vibrateFallbackToDevice = it))) }
+        )
+
+        SettingToggle(
+            title = "Emulate Motion Sensors With Device Gyro",
+            subtitle = "Use built-in phone/tablet gyroscope for Player 1 when controller lacks motion sensors",
+            checked = settings.features.gamepadMotionFallbackToDevice,
+            onCheckedChange = { onUpdate(settings.copy(features = settings.features.copy(gamepadMotionFallbackToDevice = it))) }
         )
 
         SettingToggle(

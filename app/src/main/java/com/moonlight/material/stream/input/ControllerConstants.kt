@@ -20,6 +20,14 @@ object ControllerButtonFlags {
     const val X = 0x4000
     const val Y = 0x8000
 
+    // Sunshine extended button flags
+    const val PADDLE1 = 0x010000
+    const val PADDLE2 = 0x020000
+    const val PADDLE3 = 0x040000
+    const val PADDLE4 = 0x080000
+    const val TOUCHPAD = 0x100000
+    const val MISC = 0x200000
+
     const val STANDARD_BUTTONS = UP or DOWN or LEFT or RIGHT or START or BACK or LS_CLK or
         RS_CLK or LB or RB or SPECIAL or A or B or X or Y
 }

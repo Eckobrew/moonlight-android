@@ -127,6 +127,7 @@ class StreamActivity : ComponentActivity() {
         }
         sessionController.applicationContext = applicationContext
         sessionController.displayRefreshRate = { bestMode?.refreshRate ?: display.refreshRate }
+        sessionController.displayRotation = { windowManager.defaultDisplay.rotation }
         sessionController.displaySupportsHdr10 = {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 display.hdrCapabilities?.supportedHdrTypes?.contains(android.view.Display.HdrCapabilities.HDR_TYPE_HDR10) == true
@@ -163,11 +164,29 @@ class StreamActivity : ComponentActivity() {
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if (::sessionController.isInitialized && sessionController.canForwardGamepadInput &&
-            sessionController.controllerHandler(event.deviceId, event.device)?.handleGenericMotionEvent(event) == true) {
-            return true
+        if (::sessionController.isInitialized && sessionController.canForwardGamepadInput) {
+            if (event.isFromSource(InputDevice.SOURCE_TOUCHPAD) &&
+                sessionController.controllerHandler(event.deviceId, event.device)?.tryHandleTouchpadEvent(event) == true
+            ) {
+                return true
+            }
+            if (sessionController.controllerHandler(event.deviceId, event.device)?.handleGenericMotionEvent(event) == true) {
+                return true
+            }
         }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (::sessionController.isInitialized && sessionController.canForwardGamepadInput &&
+            event.isFromSource(InputDevice.SOURCE_TOUCHPAD) &&
+            !event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)
+        ) {
+            if (sessionController.controllerHandler(event.deviceId, event.device)?.tryHandleTouchpadEvent(event) == true) {
+                return true
+            }
+        }
+        return super.dispatchTouchEvent(event)
     }
 
     private fun setMetaKeyCaptureState(enabled: Boolean) {
