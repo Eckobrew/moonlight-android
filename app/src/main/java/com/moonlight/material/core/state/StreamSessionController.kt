@@ -285,6 +285,14 @@ class StreamSessionController(
         _touchpadMode.value = enabled
     }
 
+    private val _inputCaptured = MutableStateFlow(true)
+    val inputCaptured: StateFlow<Boolean> = _inputCaptured.asStateFlow()
+
+    fun toggleInputCapture() {
+        _inputCaptured.value = !_inputCaptured.value
+        if (!_inputCaptured.value) touchMouseHandler.releasePhysicalMouse()
+    }
+
     var keyboardOverlayActive: Boolean = false
     val localInputActive: Boolean
         get() = keyboardOverlayActive || _showSessionControls.value || _currentStageName.value != "Connected"
@@ -764,7 +772,7 @@ class StreamSessionController(
     }
 
     fun handleKeyEvent(event: KeyEvent): Boolean {
-        if (!_isStreaming.value || localInputActive) return false
+        if (!_isStreaming.value || localInputActive || !_inputCaptured.value) return false
         val isDown = event.action == KeyEvent.ACTION_DOWN
         if (!isDown && event.action != KeyEvent.ACTION_UP) return false
         val hostKey = KeycodeMappings.hostKey(

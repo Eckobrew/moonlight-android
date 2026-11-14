@@ -30,6 +30,7 @@ import kotlin.math.abs
 class StreamActivity : ComponentActivity() {
 
     private lateinit var sessionController: StreamSessionController
+    private var captureShortcutKey: Int? = null
     private var streamAspectRatio = Rational(16, 9)
     private var wifiLock: WifiManager.WifiLock? = null
 
@@ -128,10 +129,42 @@ class StreamActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) captureShortcutKey = null
         if (::sessionController.isInitialized) sessionController.updateAppFocus(hasFocus)
     }
 
+    private fun handleStreamShortcut(event: KeyEvent): Boolean {
+        val key = event.keyCode
+        if (key != KeyEvent.KEYCODE_Z && key != KeyEvent.KEYCODE_Q) return false
+        if (event.action == KeyEvent.ACTION_UP && captureShortcutKey == key) {
+            captureShortcutKey = null
+            if (key == KeyEvent.KEYCODE_Z) {
+                if (sessionController.inputCaptured.value) {
+                    sessionController.sendKeyboardEvent(0x80A0.toShort(), false)
+                    sessionController.sendKeyboardEvent(0x80A1.toShort(), false)
+                    sessionController.sendKeyboardEvent(0x80A2.toShort(), false)
+                    sessionController.sendKeyboardEvent(0x80A3.toShort(), false)
+                    sessionController.sendKeyboardEvent(0x80A4.toShort(), false)
+                    sessionController.sendKeyboardEvent(0x80A5.toShort(), false)
+                }
+                sessionController.toggleInputCapture()
+            } else {
+                sessionController.stopSession(forceQuitApp = false)
+                finish()
+            }
+            return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.isCtrlPressed &&
+            event.isAltPressed && event.isShiftPressed && !event.isMetaPressed) {
+            captureShortcutKey = key
+            return true
+        }
+        return false
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (::sessionController.isInitialized && !sessionController.localInputActive &&
+            handleStreamShortcut(event)) return true
         if (::sessionController.isInitialized && sessionController.canForwardGamepadInput) {
             val handler = sessionController.controllerHandler(event.deviceId, event.device)
                 ?: return super.dispatchKeyEvent(event)

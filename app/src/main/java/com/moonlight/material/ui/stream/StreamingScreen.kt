@@ -123,7 +123,8 @@ fun StreamingScreen(
             Modifier.fillMaxHeight().aspectRatio(videoAspect)
         else Modifier.fillMaxWidth().aspectRatio(videoAspect)
         // Video SurfaceView
-        val captureMouse = physicalMouseConnected && stageName == "Connected" && !showKeyboardOverlay && !showControlsSheet
+        val inputCaptured by session.inputCaptured.collectAsState()
+        val captureMouse = inputCaptured && physicalMouseConnected && stageName == "Connected" && !showKeyboardOverlay && !showControlsSheet
         AndroidView(
             factory = { context ->
                 object : SurfaceView(context) {
@@ -135,12 +136,12 @@ fun StreamingScreen(
                     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                         super.onWindowFocusChanged(hasWindowFocus)
                         if (hasWindowFocus && hasFocus() && !session.localInputActive &&
-                            physicalMouseConnected) requestPointerCapture()
+                            physicalMouseConnected && session.inputCaptured.value) requestPointerCapture()
                     }
                 }.apply {
                     isFocusableInTouchMode = true
                     setOnCapturedPointerListener { view, event ->
-                        !session.localInputActive && session.touchMouseHandler.handleGenericMotion(event, view.width, view.height)
+                        session.inputCaptured.value && !session.localInputActive && session.touchMouseHandler.handleGenericMotion(event, view.width, view.height)
                     }
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
@@ -160,7 +161,7 @@ fun StreamingScreen(
                     })
 
                     setOnGenericMotionListener { view, event ->
-                        !session.localInputActive && session.touchMouseHandler.handleGenericMotion(event, view.width, view.height)
+                        session.inputCaptured.value && !session.localInputActive && session.touchMouseHandler.handleGenericMotion(event, view.width, view.height)
                     }
 
                     setOnKeyListener { _, _, event ->
@@ -192,7 +193,7 @@ fun StreamingScreen(
                         "Stream touch down, source=${event.source}, touchpad=${session.touchMouseHandler.isDesktopMouseMode}", "INPUT")
                 }
                 if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
-                    !session.localInputActive &&
+                    session.inputCaptured.value && !session.localInputActive &&
                         session.touchMouseHandler.handleGenericMotion(event, touchAreaSize.width, touchAreaSize.height)
                 } else {
                     session.touchMouseHandler.handleTouchEvent(event, touchAreaSize.width, touchAreaSize.height)
