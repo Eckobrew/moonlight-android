@@ -301,7 +301,7 @@ class StreamSessionController(
                     streamWidth = settings.width,
                     streamHeight = settings.height,
                     streamFps = settings.fps,
-                    enablePacing = false,
+                    enablePacing = settings.enableFramePacing,
                     listener = this@StreamSessionController
                 )
                 audioEngine = AudioPlaybackEngine(muteOnFocusLoss = settings.muteAudioOnFocusLoss)

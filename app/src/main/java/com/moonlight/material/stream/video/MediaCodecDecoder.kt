@@ -386,9 +386,12 @@ class MediaCodecDecoder(
                             // Count outputs regardless of whether a matching input timestamp exists.
                             listener?.onFrameDecoded(decodeMs ?: 0.0)
                         }
-                        val releaseTimestampNs = pacer.calculateReleaseTimeNs()
-                        codec.releaseOutputBuffer(outIndex, releaseTimestampNs)
-                        if (isFrame) totalFramesRendered++
+                        if (isFrame) {
+                            codec.releaseOutputBuffer(outIndex, pacer.calculateReleaseTimeNs())
+                            totalFramesRendered++
+                        } else {
+                            codec.releaseOutputBuffer(outIndex, false)
+                        }
                     } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val newFormat = codec.outputFormat
                         val width = if (newFormat.containsKey("crop-right") && newFormat.containsKey("crop-left"))

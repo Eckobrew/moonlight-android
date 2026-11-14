@@ -93,7 +93,8 @@ class FramePacer(
             }
 
             val targetNs = lastRenderTimeNs + framePeriodNs
-            lastRenderTimeNs = if (targetNs < nowNs) nowNs else targetNs
+            // Keep the presentation queue bounded when decoded frames arrive in bursts.
+            lastRenderTimeNs = targetNs.coerceIn(nowNs, nowNs + framePeriodNs)
             return lastRenderTimeNs
         }
     }
