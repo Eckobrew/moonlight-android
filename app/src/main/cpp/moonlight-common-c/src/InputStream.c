@@ -120,6 +120,7 @@ int initializeInputStream(void) {
     // Start with the virtual mouse centered
     absCurrentPosX = absCurrentPosY = 0.5f;
 
+    memset(currentQueuedControllerPacket, 0, sizeof(currentQueuedControllerPacket));
     memset(currentGamepadSensorState, 0, sizeof(currentGamepadSensorState));
     memset(&currentRelativeMouseState, 0, sizeof(currentRelativeMouseState));
     memset(&currentAbsoluteMouseState, 0, sizeof(currentAbsoluteMouseState));
@@ -1063,9 +1064,9 @@ static int sendControllerEventInternal(short controllerNumber, short activeGamep
         // We do not support batching with the legacy controller packet format
         LC_ASSERT(AppVersionQuad[0] > 3);
 
-        // If this new packet has different button flags, end the batch to ensure the
-        // host receives the exact axis values present at the time of the button press.
-        if (holder->packet.multiController.buttonFlags != LE16((short)buttonFlags) ||
+        // Preserve controller arrivals/removals and button transitions even when batching.
+        if (holder->packet.multiController.activeGamepadMask != LE16(activeGamepadMask) ||
+            holder->packet.multiController.buttonFlags != LE16((short)buttonFlags) ||
             holder->packet.multiController.buttonFlags2 != (IS_SUNSHINE() ? LE16((short)(buttonFlags >> 16)) : 0)) {
             // Pretend there wasn't a currently queued controller packet
             holder = NULL;
@@ -1147,29 +1148,23 @@ static int sendControllerEventInternal(short controllerNumber, short activeGamep
         }
     }
 
-    // We can unlock the batched input mutex before enqueuing the new holder because
-    // the input thread only cares if currentQueuedControllerPacket is equal to the
-    // holder it's currently processing. Since it cannot be processing the holder
-    // until we enqueue it, there's no risk here of it processing/freeing the
-    // holder when we're still touching it.
-    //
-    // Unlocking early saves a context switch in the common case where the newly
-    // queued packet wakes up the input thread which then immediately blocks on
-    // the batched input mutex until this thread runs again to release it.
-    PltUnlockMutex(&batchedInputMutex);
-
     if (enqueueHolder) {
-        // Enqueue the new packet holder
         err = LbqOfferQueueItem(&packetQueue, holder, &holder->entry);
-        if (err != LBQ_SUCCESS) {
-            LC_ASSERT(err == LBQ_BOUND_EXCEEDED);
-            Limelog("Input queue reached maximum size limit\n");
-            freePacketHolder(holder);
+        if (err != LBQ_SUCCESS && currentQueuedControllerPacket[controllerNumber] == holder) {
+            currentQueuedControllerPacket[controllerNumber] = NULL;
         }
     }
     else {
-        // The packet holder we updated was already enqueued
-        err = 0;
+        err = LBQ_SUCCESS;
+    }
+    PltUnlockMutex(&batchedInputMutex);
+
+    if (err != LBQ_SUCCESS) {
+        LC_ASSERT(err == LBQ_BOUND_EXCEEDED || err == LBQ_INTERRUPTED);
+        if (err == LBQ_BOUND_EXCEEDED) {
+            Limelog("Input queue reached maximum size limit\n");
+        }
+        freePacketHolder(holder);
     }
 
     return err;
@@ -1474,8 +1469,10 @@ int LiSendControllerArrivalEvent(uint8_t controllerNumber, uint16_t activeGamepa
 
         err = LbqOfferQueueItem(&packetQueue, holder, &holder->entry);
         if (err != LBQ_SUCCESS) {
-            LC_ASSERT(err == LBQ_BOUND_EXCEEDED);
-            Limelog("Input queue reached maximum size limit\n");
+            LC_ASSERT(err == LBQ_BOUND_EXCEEDED || err == LBQ_INTERRUPTED);
+            if (err == LBQ_BOUND_EXCEEDED) {
+                Limelog("Input queue reached maximum size limit\n");
+            }
             freePacketHolder(holder);
             return err;
         }
