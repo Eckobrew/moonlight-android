@@ -427,6 +427,7 @@ class StreamSessionController(
                     streamHeight = settings.height,
                     streamFps = settings.fps,
                     enablePacing = settings.enableFramePacing,
+                    decoderPreference = settings.features.decoder,
                     listener = this@StreamSessionController
                 )
                 audioEngine = AudioPlaybackEngine(

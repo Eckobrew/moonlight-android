@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Surface
 import com.moonlight.material.bridge.MoonBridge
+import com.moonlight.material.core.models.DecoderPreference
 import com.moonlight.material.core.utils.AppLogger
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -36,6 +37,7 @@ class MediaCodecDecoder(
     private var streamHeight: Int,
     private var streamFps: Int,
     private val enablePacing: Boolean = false,
+    private val decoderPreference: DecoderPreference = DecoderPreference.AUTOMATIC,
     private val listener: VideoDecoderListener? = null
 ) {
     private val TAG = "MediaCodecDecoder"
@@ -119,6 +121,8 @@ class MediaCodecDecoder(
                 }.getOrDefault(false)
             val software = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isSoftwareOnly
                 else info.name.startsWith("OMX.google.", ignoreCase = true)
+            if (decoderPreference == DecoderPreference.HARDWARE && software ||
+                decoderPreference == DecoderPreference.SOFTWARE && !software) return@mapNotNull null
             DecoderCandidate(info.name, lowLatency, software)
         }.sortedWith(compareBy<DecoderCandidate> { it.software }.thenByDescending { it.lowLatency })
     }
@@ -130,7 +134,9 @@ class MediaCodecDecoder(
             emptyList()
         }
         var failure = "No decoder could start for $mimeType"
-        for (candidate in candidates.ifEmpty { listOf(null) }) {
+        val attempts: List<DecoderCandidate?> = if (candidates.isEmpty() &&
+            decoderPreference == DecoderPreference.AUTOMATIC) listOf(null) else candidates
+        for (candidate in attempts) {
             val decoderName = candidate?.name.orEmpty().lowercase()
             val vendorLatencyKey = when {
                 decoderName.startsWith("c2.qti.") || decoderName.startsWith("omx.qcom.") ->

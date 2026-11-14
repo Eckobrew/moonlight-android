@@ -217,6 +217,18 @@ private fun VideoSettingsTab(settings: StreamSettings, onUpdate: (StreamSettings
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+        Text("Video Decoder", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.moonlight.material.core.models.DecoderPreference.entries.forEach { preference ->
+                FilterChip(
+                    selected = settings.features.decoder == preference,
+                    onClick = { onUpdate(settings.copy(features = settings.features.copy(decoder = preference))) },
+                    label = { Text(preference.name.lowercase().replaceFirstChar { it.uppercaseChar() }) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         SettingToggle(
             title = "Enable HDR (10-bit High Dynamic Range)",
