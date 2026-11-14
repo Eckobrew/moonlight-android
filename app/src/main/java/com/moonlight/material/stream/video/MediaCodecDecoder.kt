@@ -131,12 +131,22 @@ class MediaCodecDecoder(
         }
         var failure = "No decoder could start for $mimeType"
         for (candidate in candidates.ifEmpty { listOf(null) }) {
-            val latencyOptions = when {
-                candidate?.lowLatency == true -> listOf(MediaFormat.KEY_LOW_LATENCY, null)
-                candidate?.name?.startsWith("OMX.Exynos.", ignoreCase = true) == true &&
+            val decoderName = candidate?.name.orEmpty().lowercase()
+            val vendorLatencyKey = when {
+                decoderName.startsWith("c2.qti.") || decoderName.startsWith("omx.qcom.") ->
+                    "vendor.qti-ext-dec-low-latency.enable"
+                (decoderName.startsWith("c2.exynos.") || decoderName.startsWith("omx.exynos.")) &&
                     mimeType == MediaFormat.MIMETYPE_VIDEO_AVC ->
-                    listOf("vendor.rtc-ext-dec-low-latency.enable", null)
-                else -> listOf(null)
+                    "vendor.rtc-ext-dec-low-latency.enable"
+                decoderName.startsWith("omx.mtk.") || decoderName.startsWith("omx.amlogic.") ||
+                    decoderName.startsWith("omx.amazon.") -> "vdec-lowlatency"
+                decoderName.startsWith("c2.amlogic.") -> "vendor.low-latency.enable"
+                else -> null
+            }
+            val latencyOptions = buildList {
+                if (candidate?.lowLatency == true) add(MediaFormat.KEY_LOW_LATENCY)
+                vendorLatencyKey?.let { add(it) }
+                add(null)
             }
             for (latencyKey in latencyOptions) {
                 var codecToRelease: MediaCodec? = null
