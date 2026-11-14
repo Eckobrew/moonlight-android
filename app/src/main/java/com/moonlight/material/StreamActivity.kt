@@ -1,6 +1,9 @@
 package com.moonlight.material
 
+import android.app.PictureInPictureParams
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.util.Rational
 import android.os.Bundle
 import android.os.Build
 import android.net.wifi.WifiManager
@@ -27,6 +30,7 @@ import kotlin.math.abs
 class StreamActivity : ComponentActivity() {
 
     private lateinit var sessionController: StreamSessionController
+    private var streamAspectRatio = Rational(16, 9)
     private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,6 +83,10 @@ class StreamActivity : ComponentActivity() {
             if (matchingMode != null) {
                 window.attributes = window.attributes.apply { preferredDisplayModeId = matchingMode.modeId }
             }
+        }
+        if (settings.width > 0 && settings.height > 0 &&
+            settings.width.toDouble() / settings.height in (1.0 / 2.39)..2.39) {
+            streamAspectRatio = Rational(settings.width, settings.height)
         }
         sessionController.audioContext = applicationContext
         sessionController.displayRefreshRate = { display.refreshRate }
@@ -169,6 +177,22 @@ class StreamActivity : ComponentActivity() {
             }
         }
         return super.onKeyUp(keyCode, event)
+    }
+
+    private fun enterStreamPictureInPicture(): Boolean {
+        if (!::sessionController.isInitialized || sessionController.localInputActive ||
+            !sessionController.isStreaming.value || isInPictureInPictureMode ||
+            !packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        return enterPictureInPictureMode(
+            PictureInPictureParams.Builder().setAspectRatio(streamAspectRatio).build()
+        )
+    }
+
+    override fun onPictureInPictureRequested(): Boolean = enterStreamPictureInPicture()
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) enterStreamPictureInPicture()
     }
 
     @Suppress("DEPRECATION")

@@ -38,6 +38,7 @@
         <!-- Low-Latency Streaming Activity -->
         <activity
             android:name=".StreamActivity"
+            android:supportsPictureInPicture="true"
             android:exported="false"
             android:screenOrientation="sensorLandscape"
             android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
