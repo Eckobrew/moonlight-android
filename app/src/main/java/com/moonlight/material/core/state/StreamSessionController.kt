@@ -1,6 +1,9 @@
 package com.moonlight.material.core.state
 
 import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
@@ -132,7 +135,9 @@ class StreamSessionController(
         get() = _isStreaming.value && _currentStageName.value == "Connected" && !localInputActive
 
     fun updatePhysicalController(device: InputDevice?) {
-        val changed = physicalController?.id != device?.id
+        val previous = physicalController
+        val changed = previous?.id != device?.id
+        if (changed) previous?.let { controllerVibrator(it).cancel() }
         physicalController = device
         if (changed) {
             controllerInputReceived = false
@@ -177,7 +182,9 @@ class StreamSessionController(
         if (!controllerRegistered) {
             val type = MoonBridge.guessControllerType(device.vendorId, device.productId)
             val result = MoonBridge.sendControllerArrivalEvent(
-                0, 1, type, ControllerButtonFlags.STANDARD_BUTTONS, 1 // LI_CCAP_ANALOG_TRIGGERS
+                0, 1, type, ControllerButtonFlags.STANDARD_BUTTONS,
+                (if (controllerVibrator(device).hasVibrator()) 0x03 else 0x01).toShort()
+                // LI_CCAP_ANALOG_TRIGGERS | LI_CCAP_RUMBLE when a vibrator is available
             )
             controllerRegistered = checkControllerResult("register", result)
             if (controllerRegistered) {
@@ -596,6 +603,7 @@ class StreamSessionController(
     fun stopSession(forceQuitApp: Boolean? = null) {
         touchMouseHandler.reset()
         gamepadHandler.reset()
+        physicalController?.let { controllerVibrator(it).cancel() }
         controllerRetryJob?.cancel()
         controllerRetryJob = null
         controllerAdvertisedAtLaunch = false
@@ -850,8 +858,27 @@ class StreamSessionController(
         videoDecoder?.setHdrMode(enabled, hdrMetadata)
     }
 
+    @Suppress("DEPRECATION")
+    private fun controllerVibrator(device: InputDevice): Vibrator =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) device.vibratorManager.defaultVibrator
+        else device.vibrator
+
     override fun onRumble(controllerNumber: Short, lowFreqMotor: Short, highFreqMotor: Short) {
-        gamepadHandler.handleRumble(controllerNumber, lowFreqMotor, highFreqMotor)
+        dispatchNativeEvent {
+            if (controllerNumber.toInt() != 0) return@dispatchNativeEvent
+            val device = physicalController ?: return@dispatchNativeEvent
+            val vibrator = controllerVibrator(device)
+            if (!vibrator.hasVibrator()) return@dispatchNativeEvent
+
+            val strength = maxOf(lowFreqMotor.toInt() and 0xFFFF, highFreqMotor.toInt() and 0xFFFF)
+            if (strength == 0) {
+                vibrator.cancel()
+            } else {
+                val amplitude = if (vibrator.hasAmplitudeControl()) (strength * 255 / 65535).coerceAtLeast(1)
+                    else VibrationEffect.DEFAULT_AMPLITUDE
+                vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000), intArrayOf(0, amplitude), 0))
+            }
+        }
     }
 
     override fun onRumbleTriggers(controllerNumber: Short, leftTrigger: Short, rightTrigger: Short) {
