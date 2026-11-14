@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.SystemClock
 import android.os.Build
 import com.moonlight.material.bridge.MoonBridge
 import com.moonlight.material.core.utils.AppLogger
@@ -29,6 +30,7 @@ class AudioPlaybackEngine(
     private var audioTrack: AudioTrack? = null
     private val isTrackRunning = AtomicBoolean(false)
     private var isMuted = false
+    private var lastBacklogLogMs = -1000L
     private var appFocused = true
 
     override val isRunning: Boolean
@@ -55,7 +57,10 @@ class AudioPlaybackEngine(
                 4 -> AudioFormat.CHANNEL_OUT_QUAD
                 6 -> AudioFormat.CHANNEL_OUT_5POINT1
                 8 -> 0x000018fc // AudioFormat.CHANNEL_OUT_7POINT1_SURROUND
-                else -> AudioFormat.CHANNEL_OUT_STEREO
+                else -> {
+                    AppLogger.error("Unsupported audio channel count: $negotiatedChannelCount", TAG)
+                    return -1
+                }
             }
 
             return initializeAudioTrack()
@@ -73,21 +78,29 @@ class AudioPlaybackEngine(
             Pair(false, Math.max(AudioTrack.getMinBufferSize(negotiatedSampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT), bytesPerFrame * 2))
         )
 
+        val nativeSampleRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC)
         for ((lowLatency, rawBufferSize) in attempts) {
+            if (lowLatency && nativeSampleRate != negotiatedSampleRate) continue
             val bufferSize = ((rawBufferSize + (bytesPerFrame - 1)) / bytesPerFrame) * bytesPerFrame
 
+            var candidate: AudioTrack? = null
             try {
                 val track = createAudioTrack(negotiatedSampleRate, channelMask, bufferSize, lowLatency)
+                candidate = track
+                check(track.state == AudioTrack.STATE_INITIALIZED) { "AudioTrack did not initialize" }
                 if (isMuted || (muteOnFocusLoss && !appFocused)) {
                     track.setVolume(0.0f)
                 } else {
                     track.setVolume(1.0f)
                 }
 
+                track.play()
                 audioTrack = track
+                lastBacklogLogMs = -1000L
                 AppLogger.info("AudioTrack initialized: ${negotiatedChannelCount}ch @ ${negotiatedSampleRate}Hz (buffer: ${bufferSize}b, lowLatency: $lowLatency)", TAG)
                 return 0
             } catch (e: Exception) {
+                candidate?.release()
                 AppLogger.warn("Failed AudioTrack attempt ($bufferSize bytes, lowLatency: $lowLatency): ${e.message}", TAG)
             }
         }
@@ -138,10 +151,9 @@ class AudioPlaybackEngine(
     override fun start() {
         synchronized(lock) {
             try {
-                if (audioTrack == null) {
-                    initializeAudioTrack()
-                }
-                audioTrack?.play()
+                if (audioTrack == null && initializeAudioTrack() != 0) return
+                val track = audioTrack ?: return
+                if (track.playState != AudioTrack.PLAYSTATE_PLAYING) track.play()
                 isTrackRunning.set(true)
             } catch (e: Exception) {
                 AppLogger.error("Failed to start AudioTrack: ${e.message}", TAG)
@@ -228,7 +240,11 @@ class AudioPlaybackEngine(
                 AppLogger.warn("AudioTrack write exception: ${e.message}", TAG)
             }
         } else {
-            AppLogger.info("Audio backlog exceeded limit (${pendingDuration}ms), dropping frame to bound latency", TAG)
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastBacklogLogMs >= 1000L) {
+                lastBacklogLogMs = now
+                AppLogger.info("Audio backlog exceeded limit (${pendingDuration}ms), dropping frames to bound latency", TAG)
+            }
         }
     }
 }
