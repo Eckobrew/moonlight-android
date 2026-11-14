@@ -10,6 +10,7 @@ interface MouseEventListener {
     fun onMouseMoveAbsolute(x: Short, y: Short, screenW: Short, screenH: Short)
     fun onMouseButton(button: Byte, isDown: Boolean)
     fun onMouseScroll(amount: Short)
+    fun onMouseHorizontalScroll(amount: Short) {}
 }
 
 /**
@@ -37,8 +38,40 @@ class TouchMouseHandler(
     private var downY = 0f
     private var multiTouch = false
     private var pointerCount = 0
+    private val physicalMotion = RelativeMouseMotion()
+    private var physicalButtons = 0
+
+    fun releasePhysicalMouse() {
+        updatePhysicalButtons(0)
+        physicalMotion.reset()
+    }
+
+    private fun updatePhysicalButtons(buttons: Int) {
+        val changed = physicalButtons xor buttons
+        physicalButtons = buttons
+        for ((mask, code) in PHYSICAL_BUTTONS) {
+            if (changed and mask == 0) continue
+            val mapped = when {
+                swapMouseButtons && code == MouseButtonCodes.BUTTON_LEFT -> MouseButtonCodes.BUTTON_RIGHT
+                swapMouseButtons && code == MouseButtonCodes.BUTTON_RIGHT -> MouseButtonCodes.BUTTON_LEFT
+                else -> code
+            }
+            listener.onMouseButton(mapped, buttons and mask != 0)
+        }
+    }
+
+    companion object {
+        private val PHYSICAL_BUTTONS = listOf(
+            MotionEvent.BUTTON_PRIMARY to MouseButtonCodes.BUTTON_LEFT,
+            MotionEvent.BUTTON_SECONDARY to MouseButtonCodes.BUTTON_RIGHT,
+            MotionEvent.BUTTON_TERTIARY to MouseButtonCodes.BUTTON_MIDDLE,
+            MotionEvent.BUTTON_BACK to MouseButtonCodes.BUTTON_X1,
+            MotionEvent.BUTTON_FORWARD to MouseButtonCodes.BUTTON_X2
+        )
+    }
 
     fun reset() {
+        releasePhysicalMouse()
         if (nativeTouchActive) listener.onNativeTouch(7, 0, 0f, 0f, 0f, 0f, 0f)
         nativeTouchActive = false
         nativeTouchSupported = true
@@ -188,38 +221,39 @@ class TouchMouseHandler(
         return false
     }
 
-    fun handleGenericMotion(event: MotionEvent): Boolean {
-        // Physical Mouse via Bluetooth or USB
-        if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
-            val rawDx = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X).toDouble()
-            val rawDy = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y).toDouble()
-
-            val (deltaX, deltaY) = relativeMotion.consume(
-                x = rawDx,
-                y = rawDy,
-                scaleX = mouseSensitivityX,
-                scaleY = mouseSensitivityY,
-                accumulateSensitivity = mouseSubPixelAccumulation
-            )
-
-            if (deltaX.toInt() != 0 || deltaY.toInt() != 0) {
-                listener.onMouseMoveRelative(deltaX, deltaY)
-            }
-
-            val vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL).toDouble()
-            if (vScroll != 0.0) {
-                val scrollDir = if (reverseScroll) -1.0 else 1.0
-                val (_, wheelY) = MouseWheelMotion.consume(
-                    x = 0.0,
-                    y = vScroll * scrollDir,
-                    precise = false
-                )
-                if (wheelY.toInt() != 0) {
-                    listener.onMouseScroll(wheelY)
-                }
-            }
+    fun handleGenericMotion(event: MotionEvent, viewWidth: Int, viewHeight: Int): Boolean {
+        val relative = event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)
+        if (!relative && !event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            releasePhysicalMouse()
             return true
         }
-        return false
+
+        if (relative && event.actionMasked == MotionEvent.ACTION_MOVE) {
+            val (dx, dy) = physicalMotion.consume(
+                event.x.toDouble(), event.y.toDouble(),
+                mouseSensitivityX, mouseSensitivityY, mouseSubPixelAccumulation
+            )
+            if (dx.toInt() != 0 || dy.toInt() != 0) listener.onMouseMoveRelative(dx, dy)
+        } else if (!relative && viewWidth > 0 && viewHeight > 0) {
+            listener.onMouseMoveAbsolute(
+                event.x.toInt().coerceIn(0, viewWidth).toShort(),
+                event.y.toInt().coerceIn(0, viewHeight).toShort(),
+                viewWidth.toShort(), viewHeight.toShort()
+            )
+        }
+
+        updatePhysicalButtons(event.buttonState)
+        if (event.actionMasked == MotionEvent.ACTION_SCROLL) {
+            val direction = if (reverseScroll) -1 else 1
+            val (x, y) = MouseWheelMotion.consume(
+                event.getAxisValue(MotionEvent.AXIS_HSCROLL).toDouble() * direction,
+                event.getAxisValue(MotionEvent.AXIS_VSCROLL).toDouble() * direction,
+                precise = false
+            )
+            if (x.toInt() != 0) listener.onMouseHorizontalScroll(x)
+            if (y.toInt() != 0) listener.onMouseScroll(y)
+        }
+        return true
     }
 }

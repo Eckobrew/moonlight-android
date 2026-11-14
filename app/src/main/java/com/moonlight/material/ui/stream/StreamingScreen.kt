@@ -1,6 +1,7 @@
 package com.moonlight.material.ui.stream
 
 import android.hardware.input.InputManager
+import android.view.InputDevice
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -69,15 +70,15 @@ fun StreamingScreen(
     }
     var controllerEnabled by rememberSaveable { mutableStateOf(settings.features.touchOverlayEnabled) }
     val context = LocalContext.current
+    var physicalMouseConnected by remember { mutableStateOf(false) }
     var physicalControllerId by remember { mutableStateOf<Int?>(null) }
     val physicalControllerConnected = physicalControllerId != null
     DisposableEffect(context, session) {
         val manager = context.getSystemService(Context.INPUT_SERVICE) as InputManager
         fun refreshDevices() {
-            val devices = manager.inputDeviceIds.asSequence()
-                .mapNotNull(manager::getInputDevice)
-                .filter(GamepadHandler::isGamepad)
-                .toList()
+            val inputDevices = manager.inputDeviceIds.map { manager.getInputDevice(it) }.filterNotNull()
+            physicalMouseConnected = inputDevices.any { !it.isVirtual && it.supportsSource(InputDevice.SOURCE_MOUSE) }
+            val devices = inputDevices.filter(GamepadHandler::isGamepad)
             val device = devices.firstOrNull { it.id == physicalControllerId } ?: devices.firstOrNull()
             physicalControllerId = device?.id
             session.updatePhysicalController(device)
@@ -123,9 +124,25 @@ fun StreamingScreen(
             Modifier.fillMaxHeight().aspectRatio(videoAspect)
         else Modifier.fillMaxWidth().aspectRatio(videoAspect)
         // Video SurfaceView
+        val captureMouse = physicalMouseConnected && stageName == "Connected" && !showKeyboardOverlay && !showControlsSheet
         AndroidView(
             factory = { context ->
-                SurfaceView(context).apply {
+                object : SurfaceView(context) {
+                    override fun onPointerCaptureChange(hasCapture: Boolean) {
+                        super.onPointerCaptureChange(hasCapture)
+                        if (!hasCapture) session.touchMouseHandler.releasePhysicalMouse()
+                    }
+
+                    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                        super.onWindowFocusChanged(hasWindowFocus)
+                        if (hasWindowFocus && hasFocus() && !session.localInputActive &&
+                            physicalMouseConnected) requestPointerCapture()
+                    }
+                }.apply {
+                    isFocusableInTouchMode = true
+                    setOnCapturedPointerListener { view, event ->
+                        !session.localInputActive && session.touchMouseHandler.handleGenericMotion(event, view.width, view.height)
+                    }
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
                             session.startSession(host, app, settings, holder.surface)
@@ -138,14 +155,23 @@ fun StreamingScreen(
                         }
                     })
 
-                    setOnGenericMotionListener { _, event ->
-                        session.touchMouseHandler.handleGenericMotion(event)
+                    setOnGenericMotionListener { view, event ->
+                        !session.localInputActive && session.touchMouseHandler.handleGenericMotion(event, view.width, view.height)
                     }
 
                     setOnKeyListener { _, _, event ->
                         if (session.localInputActive) return@setOnKeyListener false
                         session.handleKeyEvent(event)
                     }
+                }
+            },
+            update = { view ->
+                if (captureMouse) {
+                    view.requestFocus()
+                    if (view.hasWindowFocus() && !view.hasPointerCapture()) view.requestPointerCapture()
+                } else {
+                    if (view.hasPointerCapture()) view.releasePointerCapture()
+                    session.touchMouseHandler.releasePhysicalMouse()
                 }
             },
             modifier = Modifier.align(Alignment.Center).then(videoSize)
@@ -161,7 +187,12 @@ fun StreamingScreen(
                     com.moonlight.material.core.utils.AppLogger.debug(
                         "Stream touch down, source=${event.source}, touchpad=${session.touchMouseHandler.isDesktopMouseMode}", "INPUT")
                 }
-                session.touchMouseHandler.handleTouchEvent(event, touchAreaSize.width, touchAreaSize.height)
+                if (event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+                    !session.localInputActive &&
+                        session.touchMouseHandler.handleGenericMotion(event, touchAreaSize.width, touchAreaSize.height)
+                } else {
+                    session.touchMouseHandler.handleTouchEvent(event, touchAreaSize.width, touchAreaSize.height)
+                }
             })
 
         // Connecting indicator

@@ -1022,6 +1022,10 @@ class StreamSessionController(
         } catch (_: Throwable) {}
     }
 
+    override fun onMouseHorizontalScroll(amount: Short) {
+        if (_isStreaming.value) MoonBridge.sendMouseHighResHScroll(amount)
+    }
+
     override fun onMouseScroll(amount: Short) {
         if (!_isStreaming.value) return
         try {
